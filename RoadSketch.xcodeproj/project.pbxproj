@@ -1,0 +1,294 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 60;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* RoadSketchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* RoadSketchApp.swift */; };
+		A10000000000000000000002 /* RoadEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* RoadEditorView.swift */; };
+		A10000000000000000000003 /* RoadDocumentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* RoadDocumentStore.swift */; };
+		A10000000000000000000004 /* ProjectFileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* ProjectFileStore.swift */; };
+		A10000000000000000000005 /* RoadCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* RoadCanvasView.swift */; };
+		A10000000000000000000006 /* AppIntentRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* AppIntentRouter.swift */; };
+		A10000000000000000000007 /* RoadSketchIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* RoadSketchIntents.swift */; };
+		A10000000000000000000008 /* RoadSketchCore in Frameworks */ = {isa = PBXBuildFile; productRef = A90000000000000000000002 /* RoadSketchCore */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A20000000000000000000001 /* RoadSketchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoadSketchApp.swift; sourceTree = "<group>"; };
+		A20000000000000000000002 /* RoadEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoadEditorView.swift; sourceTree = "<group>"; };
+		A20000000000000000000003 /* RoadDocumentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoadDocumentStore.swift; sourceTree = "<group>"; };
+		A20000000000000000000004 /* ProjectFileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectFileStore.swift; sourceTree = "<group>"; };
+		A20000000000000000000005 /* RoadCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoadCanvasView.swift; sourceTree = "<group>"; };
+		A20000000000000000000006 /* AppIntentRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIntentRouter.swift; sourceTree = "<group>"; };
+		A20000000000000000000007 /* RoadSketchIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoadSketchIntents.swift; sourceTree = "<group>"; };
+		A20000000000000000000008 /* RoadSketch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RoadSketch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A30000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000008 /* RoadSketchCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A40000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				A40000000000000000000002 /* RoadSketchApp */,
+				A40000000000000000000007 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A40000000000000000000002 /* RoadSketchApp */ = {
+			isa = PBXGroup;
+			children = (
+				A40000000000000000000003 /* App */,
+				A40000000000000000000004 /* Canvas */,
+				A40000000000000000000005 /* Features */,
+				A40000000000000000000006 /* Persistence */,
+				A40000000000000000000008 /* SystemIntents */,
+			);
+			path = RoadSketchApp;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000003 /* App */ = {
+			isa = PBXGroup;
+			children = (A20000000000000000000001 /* RoadSketchApp.swift */,);
+			path = App;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000004 /* Canvas */ = {
+			isa = PBXGroup;
+			children = (A20000000000000000000005 /* RoadCanvasView.swift */,);
+			path = Canvas;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000005 /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000002 /* RoadEditorView.swift */,
+				A20000000000000000000003 /* RoadDocumentStore.swift */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000006 /* Persistence */ = {
+			isa = PBXGroup;
+			children = (A20000000000000000000004 /* ProjectFileStore.swift */,);
+			path = Persistence;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000007 /* Products */ = {
+			isa = PBXGroup;
+			children = (A20000000000000000000008 /* RoadSketch.app */,);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000008 /* SystemIntents */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000006 /* AppIntentRouter.swift */,
+				A20000000000000000000007 /* RoadSketchIntents.swift */,
+			);
+			path = SystemIntents;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A50000000000000000000001 /* RoadSketch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A80000000000000000000002 /* Build configuration list for PBXNativeTarget "RoadSketch" */;
+			buildPhases = (
+				A60000000000000000000001 /* Sources */,
+				A30000000000000000000001 /* Frameworks */,
+				A70000000000000000000001 /* Resources */,
+			);
+			buildRules = ();
+			dependencies = ();
+			name = RoadSketch;
+			packageProductDependencies = (A90000000000000000000002 /* RoadSketchCore */,);
+			productName = RoadSketch;
+			productReference = A20000000000000000000008 /* RoadSketch.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A90000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					A50000000000000000000001 = {CreatedOnToolsVersion = 16.0;};
+				};
+			};
+			buildConfigurationList = A80000000000000000000001 /* Build configuration list for PBXProject "RoadSketch" */;
+			compatibilityVersion = "Xcode 15.0";
+			developmentRegion = zh-Hans;
+			hasScannedForEncodings = 0;
+			knownRegions = ("Base", "zh-Hans", en,);
+			mainGroup = A40000000000000000000001;
+			packageReferences = (A90000000000000000000003 /* XCLocalSwiftPackageReference "." */,);
+			productRefGroup = A40000000000000000000007 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (A50000000000000000000001 /* RoadSketch */,);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A70000000000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A60000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000001 /* RoadSketchApp.swift in Sources */,
+				A10000000000000000000002 /* RoadEditorView.swift in Sources */,
+				A10000000000000000000003 /* RoadDocumentStore.swift in Sources */,
+				A10000000000000000000004 /* ProjectFileStore.swift in Sources */,
+				A10000000000000000000005 /* RoadCanvasView.swift in Sources */,
+				A10000000000000000000006 /* AppIntentRouter.swift in Sources */,
+				A10000000000000000000007 /* RoadSketchIntents.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		B10000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		B10000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		B10000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = RoadSketch;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.simulation-games";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIRequiresFullScreen = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.leyudame.RoadSketch;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 2;
+			};
+			name = Debug;
+		};
+		B10000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = RoadSketch;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.simulation-games";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIRequiresFullScreen = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.leyudame.RoadSketch;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 2;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A80000000000000000000001 /* Build configuration list for PBXProject "RoadSketch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (B10000000000000000000001 /* Debug */, B10000000000000000000002 /* Release */,);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A80000000000000000000002 /* Build configuration list for PBXNativeTarget "RoadSketch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (B10000000000000000000003 /* Debug */, B10000000000000000000004 /* Release */,);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A90000000000000000000003 /* XCLocalSwiftPackageReference "." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = .;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A90000000000000000000002 /* RoadSketchCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A90000000000000000000003 /* XCLocalSwiftPackageReference "." */;
+			productName = RoadSketchCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = A90000000000000000000001 /* Project object */;
+}
