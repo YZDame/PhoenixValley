@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct RoadSketchApp: App {
+struct PhoenixValleyApp: App {
     @State private var document = RoadDocumentStore()
     @State private var intentRouter = AppIntentRouter.shared
 

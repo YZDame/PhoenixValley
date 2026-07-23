@@ -1,6 +1,6 @@
-# RoadSketch
+# 凤凰山谷（Phoenix Valley）
 
-RoadSketch is an iPad-first road-network sketching sandbox. Apple Pencil draws semantic roads; fingers pan and zoom the terrain.
+Phoenix Valley is an iPad-first road-network sketching sandbox. Apple Pencil draws semantic roads; fingers pan and zoom the terrain.
 
 ## Current prototype
 
@@ -20,8 +20,8 @@ RoadSketch is an iPad-first road-network sketching sandbox. Apple Pencil draws s
 ## Run
 
 1. Install the full Xcode application.
-2. Open `RoadSketch.xcodeproj`.
-3. Select the `RoadSketch` scheme and an iPad Simulator or connected iPad.
+2. Open `PhoenixValley.xcodeproj`.
+3. Select the `PhoenixValley` scheme and an iPad Simulator or connected iPad.
 4. Set your Development Team under Signing & Capabilities when installing on a physical iPad.
 5. Build and run.
 

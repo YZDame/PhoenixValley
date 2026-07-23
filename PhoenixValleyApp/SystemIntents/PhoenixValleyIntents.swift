@@ -1,5 +1,5 @@
 import AppIntents
-import RoadSketchCore
+import PhoenixValleyCore
 
 enum IntentRoadKind: String, AppEnum {
     case motorway
@@ -28,7 +28,7 @@ enum IntentRoadKind: String, AppEnum {
 
 struct OpenRoadCanvasIntent: AppIntent {
     static let title: LocalizedStringResource = "开始规划路网"
-    static let description = IntentDescription("打开 RoadSketch，并选择一种道路开始绘制。")
+    static let description = IntentDescription("打开凤凰山谷，并选择一种道路开始绘制。")
     static let openAppWhenRun = true
 
     @available(iOS 26.0, *)
@@ -45,7 +45,7 @@ struct OpenRoadCanvasIntent: AppIntent {
 
 struct CreateRandomMapIntent: AppIntent {
     static let title: LocalizedStringResource = "创建随机地图"
-    static let description = IntentDescription("生成一张新的随机地形地图并在 RoadSketch 中打开。")
+    static let description = IntentDescription("生成一张新的随机地形地图并在凤凰山谷中打开。")
     static let openAppWhenRun = true
 
     @available(iOS 26.0, *)
@@ -57,7 +57,7 @@ struct CreateRandomMapIntent: AppIntent {
     }
 }
 
-struct RoadSketchShortcuts: AppShortcutsProvider {
+struct PhoenixValleyShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
             intent: OpenRoadCanvasIntent(),

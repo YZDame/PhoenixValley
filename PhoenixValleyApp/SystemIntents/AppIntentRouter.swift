@@ -1,6 +1,6 @@
 import Foundation
 import Observation
-import RoadSketchCore
+import PhoenixValleyCore
 
 @MainActor
 @Observable

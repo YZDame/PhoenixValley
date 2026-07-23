@@ -1,4 +1,4 @@
-import RoadSketchCore
+import PhoenixValleyCore
 import SwiftUI
 
 struct RoadEditorView: View {
@@ -69,7 +69,7 @@ private struct ProjectSidebar: View {
             }
 
         }
-        .navigationTitle("RoadSketch")
+        .navigationTitle("凤凰山谷")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {

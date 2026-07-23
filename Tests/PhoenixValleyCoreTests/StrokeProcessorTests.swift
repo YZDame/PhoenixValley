@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import RoadSketchCore
+@testable import PhoenixValleyCore
 
 @Test func removesDenseDuplicateSamples() {
     let points = [

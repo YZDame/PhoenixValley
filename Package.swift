@@ -3,19 +3,19 @@
 import PackageDescription
 
 let package = Package(
-    name: "RoadSketch",
+    name: "PhoenixValley",
     platforms: [
         .iOS(.v17),
         .macOS(.v14),
     ],
     products: [
-        .library(name: "RoadSketchCore", targets: ["RoadSketchCore"]),
+        .library(name: "PhoenixValleyCore", targets: ["PhoenixValleyCore"]),
     ],
     targets: [
-        .target(name: "RoadSketchCore"),
+        .target(name: "PhoenixValleyCore"),
         .testTarget(
-            name: "RoadSketchCoreTests",
-            dependencies: ["RoadSketchCore"]
+            name: "PhoenixValleyCoreTests",
+            dependencies: ["PhoenixValleyCore"]
         ),
     ]
 )

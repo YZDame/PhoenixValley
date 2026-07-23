@@ -1,15 +1,15 @@
 import Foundation
-import RoadSketchCore
+import PhoenixValleyCore
 
 @main
-enum RoadSketchCoreSmokeTests {
+enum PhoenixValleyCoreSmokeTests {
     static func main() {
         testDenseSamples()
         testStraightening()
         testEndpointSnapping()
         testSegmentSnapping()
         testTerrainDeterminism()
-        print("RoadSketchCore smoke tests passed")
+        print("PhoenixValleyCore smoke tests passed")
     }
 
     private static func testDenseSamples() {
