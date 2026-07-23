@@ -28,14 +28,20 @@ public enum MapTheme: String, Codable, CaseIterable, Identifiable, Sendable {
     case topographic
     case planning
     case ink
+    case coastal
+    case midnight
+    case forest
 
     public var id: String { rawValue }
 
     public var displayName: String {
         switch self {
-        case .topographic: "地形图"
-        case .planning: "规划图"
-        case .ink: "墨线图"
+        case .topographic: "地形"
+        case .planning: "规划"
+        case .ink: "墨线"
+        case .coastal: "海岸蓝"
+        case .midnight: "午夜"
+        case .forest: "森林"
         }
     }
 }

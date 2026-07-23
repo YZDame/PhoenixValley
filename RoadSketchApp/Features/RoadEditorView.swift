@@ -26,6 +26,7 @@ struct RoadEditorView: View {
             Text(document.saveErrorMessage ?? "未知错误")
         }
     }
+
 }
 
 private struct ProjectSidebar: View {
@@ -33,17 +34,22 @@ private struct ProjectSidebar: View {
     @State private var renameTarget: RenameTarget?
     @State private var deleteTarget: DeleteTarget?
     @State private var proposedName = ""
+    @State private var collapsedGroups: Set<UUID> = []
 
     var body: some View {
         List(selection: selectedProject) {
             ForEach(document.groups) { group in
                 Section {
-                    ForEach(projects(in: group.id)) { project in
-                        projectRow(project)
+                    if !collapsedGroups.contains(group.id) {
+                        ForEach(projects(in: group.id)) { project in
+                            projectRow(project)
+                        }
                     }
                 } header: {
                     GroupHeader(
                         group: group,
+                        isExpanded: !collapsedGroups.contains(group.id),
+                        onToggle: { toggleGroup(group.id) },
                         onRename: { beginRenaming(group) },
                         onDelete: { deleteTarget = .group(group) }
                     )
@@ -61,6 +67,7 @@ private struct ProjectSidebar: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
         }
         .navigationTitle("RoadSketch")
         .toolbar {
@@ -90,7 +97,7 @@ private struct ProjectSidebar: View {
         }
         .confirmationDialog(
             deleteTarget?.title ?? "确认删除",
-            isPresented: deletePresentation,
+            isPresented: groupDeletePresentation,
             titleVisibility: .visible
         ) {
             Button(deleteTarget?.actionTitle ?? "删除", role: .destructive) {
@@ -119,6 +126,18 @@ private struct ProjectSidebar: View {
         }
         .tag(project.id)
         .contextMenu { projectActions(project) }
+        .confirmationDialog(
+            deleteTarget?.title ?? "确认删除",
+            isPresented: deletePresentation(for: project),
+            titleVisibility: .visible
+        ) {
+            Button(deleteTarget?.actionTitle ?? "删除地图", role: .destructive) {
+                commitDelete()
+            }
+            Button("取消", role: .cancel) { deleteTarget = nil }
+        } message: {
+            Text(deleteTarget?.message ?? "这个操作无法撤销。")
+        }
     }
 
     @ViewBuilder
@@ -169,8 +188,36 @@ private struct ProjectSidebar: View {
         )
     }
 
+    private var groupDeletePresentation: Binding<Bool> {
+        Binding(
+            get: {
+                if case .group = deleteTarget { return true }
+                return false
+            },
+            set: { if !$0 { deleteTarget = nil } }
+        )
+    }
+
+    private func deletePresentation(for project: RoadProject) -> Binding<Bool> {
+        Binding(
+            get: {
+                guard case let .project(target) = deleteTarget else { return false }
+                return target.id == project.id
+            },
+            set: { if !$0 { deleteTarget = nil } }
+        )
+    }
+
     private func projects(in groupID: UUID?) -> [RoadProject] {
         document.projects.filter { $0.groupID == groupID }
+    }
+
+    private func toggleGroup(_ id: UUID) {
+        if collapsedGroups.contains(id) {
+            collapsedGroups.remove(id)
+        } else {
+            collapsedGroups.insert(id)
+        }
     }
 
     private func select(_ project: RoadProject) {
@@ -251,12 +298,21 @@ private enum DeleteTarget {
 
 private struct GroupHeader: View {
     let group: ProjectGroup
+    let isExpanded: Bool
+    let onToggle: () -> Void
     let onRename: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
         HStack {
-            Label(group.name, systemImage: "folder")
+            Button(action: onToggle) {
+                HStack(spacing: 6) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.caption.weight(.bold))
+                    Label(group.name, systemImage: "folder")
+                }
+            }
+            .buttonStyle(.plain)
             Spacer()
             Menu {
                 Button("重命名分组", systemImage: "pencil", action: onRename)
@@ -292,23 +348,30 @@ private struct ProjectRow: View {
 
 private struct RoadCanvasWorkspace: View {
     @Bindable var document: RoadDocumentStore
-    @State private var paletteDock: PaletteDock = .bottom
     @State private var isPaletteExpanded = true
     @State private var showsMapAppearance = false
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .topTrailing) {
-                RoadCanvasRepresentable(
-                    project: document.project,
-                    selectedKind: document.selectedKind,
-                    selectedLevel: document.selectedLevel,
-                    isErasing: document.isErasing,
-                    onStrokeFinished: { points in document.addStroke(points) },
-                    onEraseFinished: { ids in document.eraseRoads(ids: ids) }
-                )
-                .ignoresSafeArea()
-
+        RoadCanvasRepresentable(
+            project: document.project,
+            selectedKind: document.selectedKind,
+            selectedLevel: document.selectedLevel,
+            isErasing: document.isErasing,
+            onStrokeFinished: { points in document.addStroke(points) },
+            onEraseFinished: { ids in document.eraseRoads(ids: ids) }
+        )
+        .ignoresSafeArea()
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            FloatingToolPalette(
+                document: document,
+                isExpanded: $isPaletteExpanded
+            )
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 10)
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
                 MapAppearanceButton(isPresented: $showsMapAppearance)
                     .popover(
                         isPresented: $showsMapAppearance,
@@ -318,19 +381,8 @@ private struct RoadCanvasWorkspace: View {
                         MapAppearancePopover(document: document)
                             .presentationCompactAdaptation(.popover)
                     }
-                    .padding(12)
-                    .zIndex(2)
-
-                FloatingToolPalette(
-                    document: document,
-                    dock: $paletteDock,
-                    isExpanded: $isPaletteExpanded,
-                    canvasSize: geometry.size
-                )
-                .zIndex(3)
             }
         }
-        .ignoresSafeArea(.container, edges: .top)
     }
 }
 
@@ -342,29 +394,9 @@ private struct MapAppearanceButton: View {
             isPresented.toggle()
         } label: {
             Image(systemName: "map.fill")
-                .font(.body.weight(.semibold))
-                .frame(width: 44, height: 44)
-                .contentShape(Circle())
         }
-        .labelStyle(.iconOnly)
-        .modifier(FloatingGlassButtonStyle())
         .accessibilityLabel("地图外观")
         .accessibilityIdentifier("map-appearance-button")
-    }
-}
-
-private struct FloatingGlassButtonStyle: ViewModifier {
-    func body(content: Content) -> some View {
-        if #available(iOS 26, *) {
-            content
-                .buttonStyle(.glass)
-        } else {
-            content
-                .buttonStyle(.plain)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay { Circle().stroke(.black.opacity(0.1)) }
-                .shadow(color: .black.opacity(0.1), radius: 8, y: 3)
-        }
     }
 }
 
@@ -376,7 +408,10 @@ private struct MapAppearancePopover: View {
             Text("地图外观")
                 .font(.headline)
 
-            HStack(spacing: 12) {
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible()), count: 3),
+                spacing: 12
+            ) {
                 ForEach(MapTheme.allCases) { theme in
                     ThemeOptionButton(
                         theme: theme,
@@ -405,7 +440,7 @@ private struct MapAppearancePopover: View {
             .accessibilityIdentifier("create-random-map-button")
         }
         .padding(20)
-        .frame(width: 354)
+        .frame(width: 390)
     }
 
     private var contoursSelection: Binding<Bool> {
@@ -478,73 +513,33 @@ private struct MapStyleThumbnail: View {
     }
 }
 
-private enum PaletteDock: Equatable {
-    case bottom
-    case left
-    case right
-
-    var isVertical: Bool { self != .bottom }
-}
-
 private struct FloatingToolPalette: View {
     @Bindable var document: RoadDocumentStore
-    @Binding var dock: PaletteDock
     @Binding var isExpanded: Bool
-    let canvasSize: CGSize
-    @GestureState private var dragTranslation: CGSize = .zero
 
     var body: some View {
-        Group {
-            if dock.isVertical {
-                verticalPalette
-            } else {
-                horizontalPalette
-            }
-        }
-        .padding(dock.isVertical ? 10 : 8)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(.black.opacity(0.1))
-        }
-        .shadow(color: .black.opacity(0.14), radius: 12, y: 5)
-        .fixedSize()
-        .position(
-            x: restingPosition.x + dragTranslation.width,
-            y: restingPosition.y + dragTranslation.height
-        )
-        .animation(.interactiveSpring(response: 0.34, dampingFraction: 0.82), value: dock)
+        horizontalPalette
+            .padding(8)
+            .modifier(PaletteGlassSurface())
         .animation(.snappy(duration: 0.22), value: isExpanded)
-        .sensoryFeedback(.alignment, trigger: dock)
         .accessibilityElement(children: .contain)
     }
 
     private var horizontalPalette: some View {
         HStack(spacing: 8) {
-            dragHandle
-            paletteContent(isVertical: false)
+            paletteContent
             Divider().frame(height: 34)
             historyAndCollapseControls
         }
     }
 
-    private var verticalPalette: some View {
-        VStack(spacing: 8) {
-            dragHandle
-                .frame(height: 20)
-            paletteContent(isVertical: true)
-            Divider().frame(width: 142)
-            historyAndCollapseControls
-        }
-    }
-
     @ViewBuilder
-    private func paletteContent(isVertical: Bool) -> some View {
+    private var paletteContent: some View {
         if isExpanded {
-            ToolControls(document: document, isVertical: isVertical)
+            ToolControls(document: document)
                 .transition(.opacity.combined(with: .scale(scale: 0.96)))
         } else {
-            CompactToolSummary(document: document, isVertical: isVertical)
+            CompactToolSummary(document: document)
                 .transition(.opacity)
         }
     }
@@ -580,56 +575,26 @@ private struct FloatingToolPalette: View {
         }
     }
 
-    private var dragHandle: some View {
-        Image(systemName: "line.3.horizontal")
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .frame(width: 26, height: 42)
-            .contentShape(Rectangle())
-            .accessibilityLabel("拖动画笔栏")
-            .accessibilityAction(named: "停靠左侧") { dock = .left }
-            .accessibilityAction(named: "停靠底部") { dock = .bottom }
-            .accessibilityAction(named: "停靠右侧") { dock = .right }
-            .gesture(
-                DragGesture(minimumDistance: 2)
-                    .updating($dragTranslation) { value, state, _ in
-                        state = value.translation
-                    }
-                    .onEnded { value in
-                        let predicted = CGPoint(
-                            x: restingPosition.x + value.predictedEndTranslation.width,
-                            y: restingPosition.y + value.predictedEndTranslation.height
-                        )
-                        dock = Self.nearestDock(to: predicted, in: canvasSize)
-                    }
-            )
-    }
+}
 
-    private var restingPosition: CGPoint {
-        let inset: CGFloat = 14
-        switch dock {
-        case .bottom:
-            return CGPoint(x: canvasSize.width / 2, y: canvasSize.height - inset - 34)
-        case .left:
-            return CGPoint(x: inset + (isExpanded ? 86 : 58), y: canvasSize.height / 2)
-        case .right:
-            return CGPoint(x: canvasSize.width - inset - (isExpanded ? 86 : 58), y: canvasSize.height / 2)
+private struct PaletteGlassSurface: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26, *) {
+            content
+                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 20))
+        } else {
+            content
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(.black.opacity(0.1))
+                }
         }
-    }
-
-    static func nearestDock(to point: CGPoint, in size: CGSize) -> PaletteDock {
-        let distances: [(PaletteDock, CGFloat)] = [
-            (.left, point.x),
-            (.right, size.width - point.x),
-            (.bottom, size.height - point.y),
-        ]
-        return distances.min(by: { $0.1 < $1.1 })?.0 ?? .bottom
     }
 }
 
 private struct CompactToolSummary: View {
     @Bindable var document: RoadDocumentStore
-    let isVertical: Bool
 
     var body: some View {
         HStack(spacing: 8) {
@@ -643,22 +608,14 @@ private struct CompactToolSummary: View {
             }
         }
         .font(.caption.weight(.medium))
-        .frame(width: isVertical ? 74 : 88, height: isVertical ? 48 : nil)
+        .frame(width: 88)
     }
 }
 
 private struct ToolControls: View {
     @Bindable var document: RoadDocumentStore
-    let isVertical: Bool
 
-    @ViewBuilder
-    var body: some View {
-        if isVertical {
-            verticalControls
-        } else {
-            horizontalControls
-        }
-    }
+    var body: some View { horizontalControls }
 
     private var horizontalControls: some View {
         HStack(spacing: 7) {
@@ -675,19 +632,6 @@ private struct ToolControls: View {
         }
     }
 
-    private var verticalControls: some View {
-        VStack(spacing: 10) {
-            LazyVGrid(columns: [GridItem(.fixed(68)), GridItem(.fixed(68))], spacing: 6) {
-                ForEach(RoadKind.allCases) { kind in
-                    roadButton(kind)
-                }
-                eraseButton
-            }
-            Divider().frame(width: 142)
-            levelPicker.frame(width: 146)
-            correctionSlider.frame(width: 142)
-        }
-    }
 
     private func roadButton(_ kind: RoadKind) -> some View {
         RoadToolButton(kind: kind, isSelected: document.selectedKind == kind) {
@@ -755,6 +699,7 @@ private struct RoadToolButton: View {
             )
         }
         .buttonStyle(.plain)
+        .contentShape(Rectangle())
         .accessibilityIdentifier("road-tool-\(kind.rawValue)")
     }
 }
@@ -796,6 +741,9 @@ private extension MapTheme {
         case .topographic: "mountain.2.fill"
         case .planning: "point.bottomleft.forward.to.point.topright.scurvepath"
         case .ink: "scribble.variable"
+        case .coastal: "water.waves"
+        case .midnight: "moon.stars.fill"
+        case .forest: "tree.fill"
         }
     }
 
@@ -804,6 +752,9 @@ private extension MapTheme {
         case .topographic: Color(red: 0.72, green: 0.82, blue: 0.59)
         case .planning: Color(red: 0.91, green: 0.92, blue: 0.85)
         case .ink: Color(white: 0.94)
+        case .coastal: Color(red: 0.49, green: 0.77, blue: 0.86)
+        case .midnight: Color(red: 0.08, green: 0.14, blue: 0.22)
+        case .forest: Color(red: 0.56, green: 0.7, blue: 0.49)
         }
     }
 
@@ -812,6 +763,9 @@ private extension MapTheme {
         case .topographic: Color(red: 0.24, green: 0.34, blue: 0.22)
         case .planning: Color(red: 0.28, green: 0.34, blue: 0.35)
         case .ink: Color(white: 0.22)
+        case .coastal: Color(red: 0.12, green: 0.34, blue: 0.42)
+        case .midnight: Color(red: 0.7, green: 0.86, blue: 0.95)
+        case .forest: Color(red: 0.18, green: 0.3, blue: 0.18)
         }
     }
 }

@@ -346,25 +346,61 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
     private func drawRoads(in context: CGContext) {
         for level in RoadLevel.allCases {
             for road in roads where road.level == level {
-                draw(road: road, in: context)
+                drawRoadCasing(road: road, in: context)
+            }
+        }
+        for level in RoadLevel.allCases {
+            for road in roads where road.level == level {
+                drawRoadSurface(road: road, in: context)
             }
         }
     }
 
-    private func draw(road: RoadSegment, in context: CGContext) {
-        guard let first = road.points.first else { return }
+    private func roadPath(for road: RoadSegment) -> CGMutablePath? {
+        guard let first = road.points.first else { return nil }
         let path = CGMutablePath()
         path.move(to: first.cgPoint)
         for point in road.points.dropFirst() {
             path.addLine(to: point.cgPoint)
         }
+        return path
+    }
+
+    private func drawRoadCasing(road: RoadSegment, in context: CGContext) {
+        guard let path = roadPath(for: road) else { return }
+
+        context.saveGState()
+        context.setLineCap(.round)
+        context.setLineJoin(.round)
+        let casingColor = activeEraseIDs.contains(road.id)
+            ? UIColor.systemRed.withAlphaComponent(0.3)
+            : theme.roadPalette.casing
+        context.setStrokeColor(casingColor.cgColor)
+        context.setLineWidth((road.kind.screenWidth + road.kind.casingWidth) / zoomScale)
+        if road.kind == .railway || road.level == .tunnel {
+            context.setLineDash(phase: 0, lengths: [8 / zoomScale, 5 / zoomScale])
+        }
+        if road.level == .elevated {
+            context.setShadow(
+                offset: CGSize(width: 0, height: 2 / zoomScale),
+                blur: 2 / zoomScale,
+                color: UIColor.black.withAlphaComponent(0.22).cgColor
+            )
+        }
+        context.addPath(path)
+        context.strokePath()
+        context.restoreGState()
+    }
+
+    private func drawRoadSurface(road: RoadSegment, in context: CGContext) {
+        guard let path = roadPath(for: road) else { return }
 
         context.saveGState()
         context.setLineCap(.round)
         context.setLineJoin(.round)
         let roadColor = activeEraseIDs.contains(road.id)
             ? UIColor.systemRed.withAlphaComponent(0.78)
-            : road.kind.uiColor(for: road.level)
+            : theme.roadPalette.color(for: road.kind, level: road.level)
         context.setStrokeColor(roadColor.cgColor)
         context.setLineWidth(road.kind.screenWidth / zoomScale)
         if road.kind == .railway || road.level == .tunnel {
@@ -517,7 +553,69 @@ private extension MapTheme {
                 contour: UIColor.black.withAlphaComponent(0.16),
                 shoreline: UIColor.black.withAlphaComponent(0.28)
             )
+        case .coastal:
+            TerrainPalette(
+                water: UIColor(red: 0.49, green: 0.77, blue: 0.86, alpha: 1),
+                plain: UIColor(red: 0.96, green: 0.91, blue: 0.76, alpha: 1),
+                lowland: UIColor(red: 0.84, green: 0.87, blue: 0.67, alpha: 1),
+                hill: UIColor(red: 0.78, green: 0.72, blue: 0.54, alpha: 1),
+                mountain: UIColor(red: 0.57, green: 0.48, blue: 0.4, alpha: 1),
+                grid: UIColor.white.withAlphaComponent(0.14),
+                contour: UIColor(red: 0.22, green: 0.38, blue: 0.4, alpha: 0.25),
+                shoreline: UIColor(red: 0.12, green: 0.34, blue: 0.42, alpha: 0.55)
+            )
+        case .midnight:
+            TerrainPalette(
+                water: UIColor(red: 0.05, green: 0.1, blue: 0.17, alpha: 1),
+                plain: UIColor(red: 0.11, green: 0.16, blue: 0.2, alpha: 1),
+                lowland: UIColor(red: 0.14, green: 0.22, blue: 0.23, alpha: 1),
+                hill: UIColor(red: 0.2, green: 0.27, blue: 0.25, alpha: 1),
+                mountain: UIColor(red: 0.3, green: 0.32, blue: 0.28, alpha: 1),
+                grid: UIColor.white.withAlphaComponent(0.08),
+                contour: UIColor(red: 0.54, green: 0.72, blue: 0.68, alpha: 0.28),
+                shoreline: UIColor(red: 0.48, green: 0.7, blue: 0.78, alpha: 0.45)
+            )
+        case .forest:
+            TerrainPalette(
+                water: UIColor(red: 0.43, green: 0.68, blue: 0.69, alpha: 1),
+                plain: UIColor(red: 0.78, green: 0.84, blue: 0.69, alpha: 1),
+                lowland: UIColor(red: 0.58, green: 0.72, blue: 0.5, alpha: 1),
+                hill: UIColor(red: 0.42, green: 0.58, blue: 0.38, alpha: 1),
+                mountain: UIColor(red: 0.3, green: 0.4, blue: 0.31, alpha: 1),
+                grid: UIColor.black.withAlphaComponent(0.05),
+                contour: UIColor(red: 0.16, green: 0.3, blue: 0.18, alpha: 0.3),
+                shoreline: UIColor(red: 0.12, green: 0.3, blue: 0.28, alpha: 0.5)
+            )
         }
+    }
+
+    var roadPalette: RoadPalette {
+        switch self {
+        case .topographic: RoadPalette(motorway: UIColor.white, arterial: UIColor(red: 0.96, green: 0.83, blue: 0.28, alpha: 1), street: UIColor(red: 0.86, green: 0.93, blue: 0.82, alpha: 1), railway: UIColor(red: 0.28, green: 0.2, blue: 0.16, alpha: 1), casing: UIColor(red: 0.18, green: 0.25, blue: 0.22, alpha: 1))
+        case .planning: RoadPalette(motorway: UIColor(red: 0.18, green: 0.2, blue: 0.21, alpha: 1), arterial: UIColor(red: 0.32, green: 0.36, blue: 0.37, alpha: 1), street: UIColor(red: 0.72, green: 0.75, blue: 0.73, alpha: 1), railway: UIColor(red: 0.35, green: 0.25, blue: 0.2, alpha: 1), casing: UIColor.white)
+        case .ink: RoadPalette(motorway: UIColor(red: 0.08, green: 0.09, blue: 0.1, alpha: 1), arterial: UIColor(red: 0.2, green: 0.22, blue: 0.23, alpha: 1), street: UIColor(red: 0.48, green: 0.5, blue: 0.5, alpha: 1), railway: UIColor.black, casing: UIColor.white)
+        case .coastal: RoadPalette(motorway: UIColor(red: 0.16, green: 0.3, blue: 0.36, alpha: 1), arterial: UIColor(red: 0.93, green: 0.52, blue: 0.22, alpha: 1), street: UIColor(red: 0.96, green: 0.88, blue: 0.62, alpha: 1), railway: UIColor(red: 0.35, green: 0.22, blue: 0.17, alpha: 1), casing: UIColor(red: 0.95, green: 0.92, blue: 0.78, alpha: 1))
+        case .midnight: RoadPalette(motorway: UIColor(red: 0.68, green: 0.84, blue: 0.95, alpha: 1), arterial: UIColor(red: 0.98, green: 0.7, blue: 0.31, alpha: 1), street: UIColor(red: 0.55, green: 0.72, blue: 0.72, alpha: 1), railway: UIColor(red: 0.78, green: 0.55, blue: 0.84, alpha: 1), casing: UIColor(red: 0.04, green: 0.08, blue: 0.13, alpha: 1))
+        case .forest: RoadPalette(motorway: UIColor(red: 0.23, green: 0.3, blue: 0.25, alpha: 1), arterial: UIColor(red: 0.77, green: 0.55, blue: 0.21, alpha: 1), street: UIColor(red: 0.87, green: 0.82, blue: 0.58, alpha: 1), railway: UIColor(red: 0.3, green: 0.19, blue: 0.14, alpha: 1), casing: UIColor(red: 0.7, green: 0.78, blue: 0.58, alpha: 1))
+        }
+    }
+}
+
+private struct RoadPalette {
+    let motorway: UIColor
+    let arterial: UIColor
+    let street: UIColor
+    let railway: UIColor
+    let casing: UIColor
+
+    func color(for kind: RoadKind, level: RoadLevel) -> UIColor {
+        let color: UIColor = switch kind {
+        case .motorway: motorway
+        case .arterial: arterial
+        case .street: street
+        case .railway: railway
+        }
+        return level == .tunnel ? color.withAlphaComponent(0.55) : color
     }
 }
 
@@ -532,6 +630,15 @@ private extension RoadKind {
         case .arterial: 7
         case .street: 3.5
         case .railway: 4
+        }
+    }
+
+    var casingWidth: CGFloat {
+        switch self {
+        case .motorway: 4
+        case .arterial: 3
+        case .street: 2
+        case .railway: 1.5
         }
     }
 
