@@ -11,6 +11,7 @@ struct RoadCanvasRepresentable: UIViewRepresentable {
     let isSelecting: Bool
     let isEditingInterchange: Bool
     let isAwaitingRampDrawing: Bool
+    let showsConstructionIssueOverlay: Bool
     let selectedInterchangeCrossingID: UUID?
     let selectedRampID: UUID?
     let selectedSourceRoadIDs: Set<UUID>
@@ -68,13 +69,17 @@ struct RoadCanvasRepresentable: UIViewRepresentable {
                 .filter { $0.status == .pending }
                 .map(\.plan.sourceRoadID)
         )
-        view.constructionIssues = RoadConstructionFeasibilityAnalyzer.evaluate(
-            roads: visibleRoads.filter {
-                !pendingSourceRoadIDs.contains($0.sourceRoadID)
-            },
-            terrain: project.terrain,
-            mapScale: project.mapScale
-        ).issues
+        view.constructionIssues = if showsConstructionIssueOverlay {
+            RoadConstructionFeasibilityAnalyzer.evaluate(
+                roads: visibleRoads.filter {
+                    !pendingSourceRoadIDs.contains($0.sourceRoadID)
+                },
+                terrain: project.terrain,
+                mapScale: project.mapScale
+            ).issues
+        } else {
+            []
+        }
         view.engineeringStructures = storedStructures + inferredStructures
         view.pendingStructureReview = pendingStructureReview.flatMap { review in
             visibleRoads.contains { $0.sourceRoadID == review.plan.sourceRoadID }

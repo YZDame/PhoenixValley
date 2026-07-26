@@ -44,13 +44,30 @@ struct RoadInterchangeInspector: View {
             rampEditor(ramp)
         } else if let crossing = document.selectedInterchangeCrossing {
             crossingEditor(crossing)
+        } else if selectableCrossings.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Label(
+                    "当前没有可编辑的异层交叉",
+                    systemImage: "diamond"
+                )
+                .font(.subheadline.weight(.semibold))
+                Text("先让两条公路在不同层级相交，例如地面道路与高架道路；再回到“立交”，轻点交叉处的青色菱形。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         } else {
-            Label(
-                "轻点画布上的菱形异层交叉",
-                systemImage: "diamond"
-            )
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 8) {
+                Label(
+                    "轻点画布上的青色菱形",
+                    systemImage: "diamond"
+                )
+                .font(.subheadline.weight(.semibold))
+                Text("选中异层交叉后，点“添加匝道”，再从一条高亮主线画到另一条。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
 
         if let message = document.pendingRampError {
@@ -232,6 +249,12 @@ struct RoadInterchangeInspector: View {
             .lazy
             .flatMap(\.ramps)
             .first { $0.id == selectedRampID }
+    }
+
+    private var selectableCrossings: [RoadRelation] {
+        document.project.roadNetwork.relations.filter {
+            $0.kind == .gradeSeparatedCrossing && $0.secondaryPoint == nil
+        }
     }
 
     private var selectedRampKind: RoadKind? {

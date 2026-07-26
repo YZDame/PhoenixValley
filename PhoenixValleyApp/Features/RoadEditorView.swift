@@ -427,6 +427,8 @@ private struct RoadCanvasWorkspace: View {
     @Bindable var document: RoadDocumentStore
     @State private var isPaletteExpanded = true
     @State private var showsMapAppearance = false
+    @AppStorage("showsConstructionIssueOverlay")
+    private var showsConstructionIssueOverlay = true
     @State private var preparedExport: PreparedMapExport?
     @State private var isPresentingExporter = false
     @State private var isPreparingExport = false
@@ -442,6 +444,7 @@ private struct RoadCanvasWorkspace: View {
             isSelecting: document.isSelecting,
             isEditingInterchange: document.isEditingInterchange,
             isAwaitingRampDrawing: document.isAwaitingRampDrawing,
+            showsConstructionIssueOverlay: showsConstructionIssueOverlay,
             selectedInterchangeCrossingID: document.selectedInterchangeCrossingID,
             selectedRampID: document.selectedRampID,
             selectedSourceRoadIDs: document.selectedSourceRoadIDs,
@@ -533,7 +536,11 @@ private struct RoadCanvasWorkspace: View {
                         attachmentAnchor: .rect(.bounds),
                         arrowEdge: .top
                     ) {
-                        MapAppearancePopover(document: document)
+                        MapAppearancePopover(
+                            document: document,
+                            showsConstructionIssueOverlay:
+                                $showsConstructionIssueOverlay
+                        )
                             .presentationCompactAdaptation(.popover)
                     }
             }
@@ -1068,165 +1075,187 @@ private struct MapAppearanceButton: View {
 
 private struct MapAppearancePopover: View {
     @Bindable var document: RoadDocumentStore
+    @Binding var showsConstructionIssueOverlay: Bool
 
     var body: some View {
         let constructionIssues = document.constructionIssues
-        VStack(alignment: .leading, spacing: 18) {
-            Text("地图外观")
-                .font(.headline)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("地图外观")
+                    .font(.headline)
 
-            LazyVGrid(
-                columns: Array(repeating: GridItem(.flexible()), count: 3),
-                spacing: 12
-            ) {
-                ForEach(MapTheme.allCases) { theme in
-                    ThemeOptionButton(
-                        theme: theme,
-                        isSelected: document.project.theme == theme
-                    ) {
-                        document.setTheme(theme)
-                    }
-                }
-            }
-
-            Divider()
-
-            VStack(spacing: 14) {
-                Toggle("地形", systemImage: "mountain.2", isOn: terrainSelection)
-                Toggle("等高线", systemImage: "lines.measurement.horizontal", isOn: contoursSelection)
-                Toggle("规划网格", systemImage: "grid", isOn: gridSelection)
-            }
-            .font(.subheadline)
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 10) {
-                LabeledContent("地图范围") {
-                    Picker("地图范围", selection: mapScaleSelection) {
-                        ForEach(MapScalePreset.allCases) { preset in
-                            Text(preset.displayName).tag(preset)
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.flexible()), count: 3),
+                    spacing: 12
+                ) {
+                    ForEach(MapTheme.allCases) { theme in
+                        ThemeOptionButton(
+                            theme: theme,
+                            isSelected: document.project.theme == theme
+                        ) {
+                            document.setTheme(theme)
                         }
                     }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .disabled(!document.project.roads.isEmpty)
-                    .accessibilityIdentifier("map-scale-picker")
                 }
 
-                Text(
-                    document.project.roads.isEmpty
-                        ? "绘路前选择；规划网格每格 \(gridCellDistanceDescription)。"
-                        : "已有道路后锁定比例；规划网格每格 \(gridCellDistanceDescription)。"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-            .font(.subheadline)
+                Divider()
 
-            Divider()
+                VStack(spacing: 14) {
+                    Toggle("地形", systemImage: "mountain.2", isOn: terrainSelection)
+                    Toggle("等高线", systemImage: "lines.measurement.horizontal", isOn: contoursSelection)
+                    Toggle("规划网格", systemImage: "grid", isOn: gridSelection)
+                }
+                .font(.subheadline)
 
-            VStack(alignment: .leading, spacing: 12) {
-                Text("道路图层")
-                    .font(.subheadline.weight(.semibold))
+                Divider()
 
-                ForEach(RoadKind.allCases) { kind in
-                    Toggle(
-                        kind.displayName,
-                        systemImage: kind.layerSymbol,
-                        isOn: roadLayerSelection(for: kind)
+                VStack(alignment: .leading, spacing: 10) {
+                    LabeledContent("地图范围") {
+                        Picker("地图范围", selection: mapScaleSelection) {
+                            ForEach(MapScalePreset.allCases) { preset in
+                                Text(preset.displayName).tag(preset)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .disabled(!document.project.roads.isEmpty)
+                        .accessibilityIdentifier("map-scale-picker")
+                    }
+
+                    Text(
+                        document.project.roads.isEmpty
+                            ? "绘路前选择；规划网格每格 \(gridCellDistanceDescription)。"
+                            : "已有道路后锁定比例；规划网格每格 \(gridCellDistanceDescription)。"
                     )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
-            }
-            .font(.subheadline)
+                .font(.subheadline)
 
-            if !document.layerConflicts.isEmpty {
                 Divider()
 
-                Label(
-                    "\(document.layerConflicts.count) 处道路层级冲突",
-                    systemImage: "exclamationmark.triangle.fill"
-                )
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.orange)
-                .accessibilityIdentifier("road-layer-conflict-summary")
-            }
-
-            if !document.project.engineeringStructures.isEmpty {
-                Divider()
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("工程构件")
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("道路图层")
                         .font(.subheadline.weight(.semibold))
-                    Label(
-                        "\(bridgeCount) 座桥梁 · \(bridgePierCount) 座桥墩",
-                        systemImage: "water.waves"
-                    )
-                    Label(
-                        "\(tunnelCount) 条隧道 · \(tunnelPortalCount) 个洞口",
-                        systemImage: "mountain.2"
-                    )
-                    if !document.engineeringIssues.isEmpty {
-                        Label(
-                            "\(document.engineeringIssues.count) 项工程约束问题",
-                            systemImage: "exclamationmark.octagon.fill"
+
+                    ForEach(RoadKind.allCases) { kind in
+                        Toggle(
+                            kind.displayName,
+                            systemImage: kind.layerSymbol,
+                            isOn: roadLayerSelection(for: kind)
                         )
-                        .foregroundStyle(.red)
-                        .accessibilityIdentifier("road-engineering-issue-summary")
                     }
                 }
-                .font(.caption)
-            }
+                .font(.subheadline)
 
-            if !document.project.roads.isEmpty {
-                Divider()
+                if !document.layerConflicts.isEmpty {
+                    Divider()
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("施工可行性")
-                        .font(.subheadline.weight(.semibold))
-                    if constructionIssues.isEmpty {
+                    Label(
+                        "\(document.layerConflicts.count) 处道路层级冲突",
+                        systemImage: "exclamationmark.triangle.fill"
+                    )
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.orange)
+                    .accessibilityIdentifier("road-layer-conflict-summary")
+                }
+
+                if !document.project.engineeringStructures.isEmpty {
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("工程构件")
+                            .font(.subheadline.weight(.semibold))
                         Label(
-                            "当前地面道路与高架未发现超限区间",
-                            systemImage: "checkmark.circle"
+                            "\(bridgeCount) 座桥梁 · \(bridgePierCount) 座桥墩",
+                            systemImage: "water.waves"
                         )
-                        .foregroundStyle(.secondary)
-                    } else {
                         Label(
-                            "\(constructionIssues.count) 个区间需要处理",
-                            systemImage: "exclamationmark.octagon.fill"
+                            "\(tunnelCount) 条隧道 · \(tunnelPortalCount) 个洞口",
+                            systemImage: "mountain.2"
                         )
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.red)
-                        .accessibilityIdentifier(
-                            "road-construction-issue-summary"
-                        )
+                        if !document.engineeringIssues.isEmpty {
+                            Label(
+                                "\(document.engineeringIssues.count) 项工程约束问题",
+                                systemImage: "exclamationmark.octagon.fill"
+                            )
+                            .foregroundStyle(.red)
+                            .accessibilityIdentifier("road-engineering-issue-summary")
+                        }
+                    }
+                    .font(.caption)
+                }
 
-                        ForEach(constructionIssues.prefix(2)) { issue in
-                            Text(issue.displayDescription)
+                if !document.project.roads.isEmpty {
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("施工可行性")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Toggle(
+                                "显示红色标注",
+                                isOn: $showsConstructionIssueOverlay
+                            )
+                            .labelsHidden()
+                            .accessibilityLabel("显示施工问题标注")
+                            .accessibilityIdentifier(
+                                "construction-issue-overlay-toggle"
+                            )
+                        }
+                        if constructionIssues.isEmpty {
+                            Label(
+                                "当前地面道路与高架未发现超限区间",
+                                systemImage: "checkmark.circle"
+                            )
+                            .foregroundStyle(.secondary)
+                        } else {
+                            Label(
+                                "\(constructionIssues.count) 个区间需要处理",
+                                systemImage: "exclamationmark.octagon.fill"
+                            )
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.red)
+                            .accessibilityIdentifier(
+                                "road-construction-issue-summary"
+                            )
+
+                            ForEach(constructionIssues.prefix(2)) { issue in
+                                Text(issue.displayDescription)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            if constructionIssues.count > 2 {
+                                Text("另有 \(constructionIssues.count - 2) 个区间")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Text("红色虚线只标出当前结构下的超限区间；隐藏标注不会改变施工判定。")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        if constructionIssues.count > 2 {
-                            Text("另有 \(constructionIssues.count - 2) 个区间")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
                     }
                 }
-            }
 
-            Divider()
+                Divider()
 
-            Button("创建随机地图", systemImage: "dice") {
-                document.createNewMap()
+                Button("创建随机地图", systemImage: "dice") {
+                    document.createNewMap()
+                }
+                .disabled(document.terrainGenerationState.isGenerating)
+                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity)
+                .accessibilityIdentifier("create-random-map-button")
             }
-            .disabled(document.terrainGenerationState.isGenerating)
-            .buttonStyle(.borderedProminent)
-            .frame(maxWidth: .infinity)
-            .accessibilityIdentifier("create-random-map-button")
+            .padding(20)
         }
-        .padding(20)
+        .scrollIndicators(.visible)
         .frame(width: 390)
+        .frame(maxHeight: 620)
     }
 
     private var terrainSelection: Binding<Bool> {
@@ -1756,12 +1785,10 @@ private struct ToolControls: View {
         Button {
             document.activateSelection()
         } label: {
-            VStack(spacing: 5) {
-                Image(systemName: "selection.pin.in.out")
-                    .font(.body.weight(.semibold))
-                Text("选择").font(.caption2)
-            }
-            .frame(width: 62, height: 48)
+            ToolButtonLabel(
+                title: "选择",
+                symbol: "selection.pin.in.out"
+            )
             .background(
                 document.isSelecting
                     ? Color.accentColor.opacity(0.14)
@@ -1777,12 +1804,10 @@ private struct ToolControls: View {
         Button {
             document.activateInterchange()
         } label: {
-            VStack(spacing: 5) {
-                Image(systemName: "point.3.connected.trianglepath.dotted")
-                    .font(.body.weight(.semibold))
-                Text("立交").font(.caption2)
-            }
-            .frame(width: 62, height: 48)
+            ToolButtonLabel(
+                title: "立交",
+                symbol: "point.3.connected.trianglepath.dotted"
+            )
             .background(
                 document.isEditingInterchange
                     ? Color.accentColor.opacity(0.14)
@@ -1798,12 +1823,10 @@ private struct ToolControls: View {
         Button {
             document.activateEraser()
         } label: {
-            VStack(spacing: 5) {
-                Image(systemName: "eraser.line.dashed")
-                    .font(.body.weight(.semibold))
-                Text("擦除").font(.caption2)
-            }
-            .frame(width: 62, height: 48)
+            ToolButtonLabel(
+                title: "擦除",
+                symbol: "eraser.line.dashed"
+            )
             .background(
                 document.isErasing ? Color.red.opacity(0.12) : .clear,
                 in: RoundedRectangle(cornerRadius: 13, style: .continuous)
@@ -1909,10 +1932,14 @@ private struct RoadToolButton: View {
         Button(action: action) {
             VStack(spacing: 5) {
                 RoadSwatch(kind: kind)
+                    .frame(height: ToolButtonLabel.iconLaneHeight)
                 Text(kind.displayName)
                     .font(.caption2)
             }
-            .frame(width: 62, height: 48)
+            .frame(
+                width: ToolButtonLabel.width,
+                height: ToolButtonLabel.height
+            )
             .background(
                 isSelected ? Color.accentColor.opacity(0.14) : .clear,
                 in: RoundedRectangle(cornerRadius: 13, style: .continuous)
@@ -1921,6 +1948,26 @@ private struct RoadToolButton: View {
         .buttonStyle(.plain)
         .contentShape(Rectangle())
         .accessibilityIdentifier("road-tool-\(kind.rawValue)")
+    }
+}
+
+private struct ToolButtonLabel: View {
+    static let width: CGFloat = 62
+    static let height: CGFloat = 48
+    static let iconLaneHeight: CGFloat = 20
+
+    let title: String
+    let symbol: String
+
+    var body: some View {
+        VStack(spacing: 5) {
+            Image(systemName: symbol)
+                .font(.body.weight(.semibold))
+                .frame(height: Self.iconLaneHeight)
+            Text(title)
+                .font(.caption2)
+        }
+        .frame(width: Self.width, height: Self.height)
     }
 }
 
