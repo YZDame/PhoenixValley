@@ -8,6 +8,7 @@ struct RoadCanvasRepresentable: UIViewRepresentable {
     let selectedKind: RoadKind
     let selectedLevel: RoadLevel
     let isErasing: Bool
+    let eraserMode: RoadEraseMode
     let isSelecting: Bool
     let isEditingInterchange: Bool
     let isAwaitingRampDrawing: Bool
@@ -101,6 +102,7 @@ struct RoadCanvasRepresentable: UIViewRepresentable {
         view.selectedKind = selectedKind
         view.selectedLevel = selectedLevel
         view.isErasing = isErasing
+        view.eraserMode = eraserMode
         view.isSelecting = isSelecting
         view.isEditingInterchange = isEditingInterchange
         view.isAwaitingRampDrawing = isAwaitingRampDrawing
@@ -184,6 +186,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
     var selectedKind: RoadKind = .arterial
     var selectedLevel: RoadLevel = .ground
     var isErasing = false
+    var eraserMode: RoadEraseMode = .wholeRoad
     var isSelecting = false {
         didSet {
             guard oldValue != isSelecting else { return }
@@ -264,6 +267,8 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
     private var hasPositionedInitialMap = false
     private var terrainImage: UIImage?
     private weak var panGesture: UIPanGestureRecognizer?
+    private var scaleBarHideWorkItem: DispatchWorkItem?
+    private var isScaleBarVisible = false
 
     #if targetEnvironment(simulator)
     private let allowsFingerDrawing = true
@@ -358,7 +363,9 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         drawRoadSelection(in: context)
         drawActiveStroke(in: context)
         context.restoreGState()
-        drawScaleBar(in: context)
+        if isScaleBarVisible {
+            drawScaleBar(in: context)
+        }
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -429,7 +436,8 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
                 RoadEraseRequest(
                     points: completedStroke,
                     radius: Double(18 / zoomScale),
-                    eligibleRoadIDs: Set(roads.map(\.id))
+                    eligibleRoadIDs: Set(roads.map(\.id)),
+                    mode: eraserMode
                 )
             )
         } else {
@@ -467,6 +475,13 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
 
     @objc private func handlePinch(_ recognizer: UIPinchGestureRecognizer) {
         updateNavigationState(for: recognizer)
+        if recognizer.state == .began || recognizer.state == .changed {
+            showScaleBar()
+        } else if recognizer.state == .ended
+            || recognizer.state == .cancelled
+            || recognizer.state == .failed {
+            scheduleScaleBarHide()
+        }
         guard recognizer.state == .began || recognizer.state == .changed else {
             return
         }
@@ -482,6 +497,22 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         recognizer.scale = 1
         refreshAccessibilityElements()
         setNeedsDisplay()
+    }
+
+    private func showScaleBar() {
+        scaleBarHideWorkItem?.cancel()
+        isScaleBarVisible = true
+        setNeedsDisplay()
+    }
+
+    private func scheduleScaleBarHide() {
+        scaleBarHideWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.isScaleBarVisible = false
+            self?.setNeedsDisplay()
+        }
+        scaleBarHideWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: workItem)
     }
 
     private func shouldHandleContentTouch(
@@ -1275,7 +1306,10 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
                 for column in 0..<terrain.gridWidth {
                     let value = Double(terrain.elevations[row * terrain.gridWidth + column])
                         / Double(UInt16.max)
-                    renderer.cgContext.setFillColor(palette.color(for: value).cgColor)
+                    let color = value <= terrain.waterLevel
+                        ? palette.water
+                        : palette.color(for: value)
+                    renderer.cgContext.setFillColor(color.cgColor)
                     renderer.cgContext.fill(CGRect(x: column, y: row, width: 1, height: 1))
                 }
             }
@@ -2005,25 +2039,14 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         guard distance > 0 else { return }
 
         let barWidth = CGFloat(distance / metersPerScreenPoint)
-        let container = CGRect(
+        let origin = CGPoint(
             x: safeAreaInsets.left + 18,
-            y: max(safeAreaInsets.top + 18, 76),
-            width: barWidth + 24,
-            height: 42
+            y: max(safeAreaInsets.top + 18, 76)
         )
         context.saveGState()
-        context.setFillColor(UIColor.systemBackground.withAlphaComponent(0.78).cgColor)
-        context.addPath(
-            UIBezierPath(
-                roundedRect: container,
-                cornerRadius: 11
-            ).cgPath
-        )
-        context.fillPath()
-
-        let startX = container.minX + 12
+        let startX = origin.x
         let endX = startX + barWidth
-        let barY = container.maxY - 11
+        let barY = origin.y + 29
         context.setStrokeColor(UIColor.label.withAlphaComponent(0.82).cgColor)
         context.setLineWidth(2)
         context.setLineCap(.round)
@@ -2039,7 +2062,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
 
         let label = formattedScaleDistance(distance) as NSString
         label.draw(
-            at: CGPoint(x: container.minX + 12, y: container.minY + 5),
+            at: origin,
             withAttributes: [
                 .font: UIFont.monospacedDigitSystemFont(
                     ofSize: 12,

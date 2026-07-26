@@ -87,6 +87,106 @@ import Testing
     #expect(count == 2)
 }
 
+@Test func terrainScenariosAreDeterministicAndVisiblyDistinct() {
+    let seed: UInt64 = 20260726
+    let terrains = TerrainScenario.allCases.map {
+        TerrainGenerator.generate(
+            seed: seed,
+            vertexCount: 72,
+            gridWidth: 33,
+            gridHeight: 25,
+            scenario: $0
+        )
+    }
+
+    #expect(Set(terrains.map(\.scenario)) == Set(TerrainScenario.allCases))
+    #expect(Set(terrains.map(\.elevations)).count >= 6)
+    #expect(
+        terrains.allSatisfy {
+            $0 == TerrainGenerator.generate(
+                seed: seed,
+                vertexCount: 72,
+                gridWidth: 33,
+                gridHeight: 25,
+                scenario: $0.scenario
+            )
+        }
+    )
+
+    let riverTerrain = terrains.first { $0.scenario == .riverAndLakes }!
+    #expect(
+        riverTerrain.elevations.contains {
+            Double($0) / Double(UInt16.max) <= riverTerrain.waterLevel
+        }
+    )
+}
+
+@Test func riverAndLakeWaterStaysScaleAwareAndVariesBySeed() {
+    let terrains = (100...105).map {
+        TerrainGenerator.generate(
+            seed: UInt64($0),
+            gridWidth: 257,
+            gridHeight: 193,
+            scenario: .riverAndLakes
+        )
+    }
+
+    let waterFractions = terrains.map { terrain in
+        Double(terrain.elevations.filter {
+            $0 > 0 && Double($0) / Double(UInt16.max) <= terrain.waterLevel
+        }.count) / Double(terrain.elevations.count)
+    }
+
+    // A local river and one or two small lakes should occupy well under 5% of
+    // this 1.92 km² map; the previous fixed geometry occupied roughly 10%.
+    #expect(
+        waterFractions.allSatisfy { $0 > 0.003 && $0 < 0.05 },
+        "water fractions: \(waterFractions)"
+    )
+    #expect(Set(terrains.map(\.elevations)).count == terrains.count)
+}
+
+@Test func continentAndRiverScenariosDoNotReuseTheSameOuterBoundary() {
+    let seed: UInt64 = 91_827
+    let continent = TerrainGenerator.generate(seed: seed, scenario: .continent)
+    let river = TerrainGenerator.generate(seed: seed, scenario: .riverAndLakes)
+    let valley = TerrainGenerator.generate(seed: seed, scenario: .valley)
+
+    #expect(continent.shoreline != river.shoreline)
+    #expect(river.shoreline != valley.shoreline)
+    #expect(continent.shoreline.count > 20)
+    #expect(river.shoreline.count > 20)
+}
+
+@Test func drainageNetworkContainsMultipleConnectedHeadwaterBranches() {
+    let terrain = TerrainGenerator.generate(
+        seed: 2026072602,
+        gridWidth: 257,
+        gridHeight: 193,
+        scenario: .riverAndLakes
+    )
+    let water = terrain.elevations.map {
+        $0 > 0 && Double($0) / Double(UInt16.max) <= terrain.waterLevel
+    }
+    var branchLikeRows = 0
+    for row in 1..<(terrain.gridHeight - 1) {
+        var runs = 0
+        var insideRun = false
+        for column in 1..<(terrain.gridWidth - 1) {
+            let isWater = water[row * terrain.gridWidth + column]
+            if isWater, !insideRun {
+                runs += 1
+            }
+            insideRun = isWater
+        }
+        if runs >= 2 {
+            branchLikeRows += 1
+        }
+    }
+
+    #expect(branchLikeRows >= 3)
+}
+
 private final class TerrainProgressRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var storedUpdates: [TerrainGenerationProgress] = []

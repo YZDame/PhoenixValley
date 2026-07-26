@@ -240,7 +240,9 @@ public enum MapExporter {
                 let elevation = Double(
                     terrain.elevations[row * terrain.gridWidth + column]
                 ) / Double(UInt16.max)
-                let color = palette.landColor(for: elevation)
+                let color = elevation <= terrain.waterLevel
+                    ? palette.water
+                    : palette.landColor(for: elevation)
                 let index = (row * terrain.gridWidth + column) * 4
                 pixels[index] = color.redByte
                 pixels[index + 1] = color.greenByte
@@ -696,9 +698,10 @@ public enum MapExporter {
                     x: (Double(column) + 0.5) * cellWidth,
                     y: (Double(row) + 0.5) * cellHeight
                 )
-                let color = palette.landColor(
-                    for: terrain.normalizedElevation(at: point)
-                )
+                let elevation = terrain.normalizedElevation(at: point)
+                let color = elevation <= terrain.waterLevel
+                    ? palette.water
+                    : palette.landColor(for: elevation)
                 body.append(
                     #"<rect x="\#(svgNumber(Double(column) * cellWidth))" y="\#(svgNumber(Double(row) * cellHeight))" width="\#(svgNumber(cellWidth + 0.5))" height="\#(svgNumber(cellHeight + 0.5))" fill="\#(color.hex)"\#(color.opacityAttribute("fill"))/>"#
                 )

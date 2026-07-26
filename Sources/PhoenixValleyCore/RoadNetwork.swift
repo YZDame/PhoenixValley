@@ -206,8 +206,47 @@ public struct RoadSegment: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
+public enum TerrainScenario: String, CaseIterable, Codable, Hashable, Identifiable, Sendable {
+    case island
+    case continent
+    case coastalCity
+    case valley
+    case basin
+    case mountains
+    case hills
+    case riverAndLakes
+
+    public var id: Self { self }
+
+    public var displayName: String {
+        switch self {
+        case .island: "海岛"
+        case .continent: "大陆"
+        case .coastalCity: "海滨城市"
+        case .valley: "山谷"
+        case .basin: "盆地"
+        case .mountains: "山地"
+        case .hills: "丘陵"
+        case .riverAndLakes: "河流与湖泊"
+        }
+    }
+
+    public var symbol: String {
+        switch self {
+        case .island: "water.waves"
+        case .continent: "map"
+        case .coastalCity: "building.2"
+        case .valley: "arrow.down.right.and.arrow.up.left"
+        case .basin: "circle.dotted"
+        case .mountains: "mountain.2"
+        case .hills: "mountain.2.circle"
+        case .riverAndLakes: "drop"
+        }
+    }
+}
+
 public struct TerrainLayout: Codable, Hashable, Sendable {
-    public static let currentGenerationVersion = 3
+    public static let currentGenerationVersion = 5
 
     public var seed: UInt64
     public var shoreline: [RoadPoint]
@@ -216,6 +255,7 @@ public struct TerrainLayout: Codable, Hashable, Sendable {
     public var gridHeight: Int
     public var elevations: [UInt16]
     public var waterLevel: Double
+    public var scenario: TerrainScenario
 
     public init(
         seed: UInt64,
@@ -224,7 +264,8 @@ public struct TerrainLayout: Codable, Hashable, Sendable {
         gridWidth: Int = 0,
         gridHeight: Int = 0,
         elevations: [UInt16] = [],
-        waterLevel: Double = 0.2
+        waterLevel: Double = 0.2,
+        scenario: TerrainScenario = .island
     ) {
         self.seed = seed
         self.shoreline = shoreline
@@ -233,6 +274,7 @@ public struct TerrainLayout: Codable, Hashable, Sendable {
         self.gridHeight = gridHeight
         self.elevations = elevations
         self.waterLevel = waterLevel
+        self.scenario = scenario
     }
 
     public var hasElevationData: Bool {
@@ -262,6 +304,7 @@ public struct TerrainLayout: Codable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case seed, shoreline, generationVersion, gridWidth, gridHeight, elevations, waterLevel
+        case scenario
     }
 
     public init(from decoder: Decoder) throws {
@@ -273,6 +316,7 @@ public struct TerrainLayout: Codable, Hashable, Sendable {
         gridHeight = try values.decodeIfPresent(Int.self, forKey: .gridHeight) ?? 0
         elevations = try values.decodeIfPresent([UInt16].self, forKey: .elevations) ?? []
         waterLevel = try values.decodeIfPresent(Double.self, forKey: .waterLevel) ?? 0.2
+        scenario = try values.decodeIfPresent(TerrainScenario.self, forKey: .scenario) ?? .island
     }
 }
 

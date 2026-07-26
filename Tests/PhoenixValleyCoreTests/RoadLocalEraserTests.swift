@@ -195,6 +195,48 @@ import Testing
     #expect(result.network.nodes.isEmpty)
 }
 
+@Test func wholeRoadEraseRemovesEveryFragmentWithMatchingSourceID() {
+    let sourceID = eraseUUID(9)
+    let first = RoadSegment(
+        id: eraseUUID(10),
+        kind: .street,
+        points: [
+            RoadPoint(x: 0, y: 20),
+            RoadPoint(x: 100, y: 20),
+        ],
+        sourceRoadID: sourceID
+    )
+    let second = RoadSegment(
+        id: eraseUUID(11),
+        kind: .street,
+        points: [
+            RoadPoint(x: 0, y: 80),
+            RoadPoint(x: 100, y: 80),
+        ],
+        sourceRoadID: sourceID
+    )
+    let untouched = eraseRoad(
+        id: eraseUUID(12),
+        points: [
+            RoadPoint(x: 0, y: 120),
+            RoadPoint(x: 100, y: 120),
+        ]
+    )
+
+    let result = RoadNetwork.erasing(
+        RoadEraseRequest(
+            points: [RoadPoint(x: 50, y: 20)],
+            radius: 10,
+            eligibleRoadIDs: [first.id, second.id, untouched.id],
+            mode: .wholeRoad
+        ),
+        from: [first, second, untouched]
+    )
+
+    #expect(result.affectedSourceRoadIDs == [sourceID])
+    #expect(result.network.roadSegments.map(\.sourceRoadID) == [untouched.sourceRoadID])
+}
+
 private func eraseRoad(id: UUID, points: [RoadPoint]) -> RoadSegment {
     RoadSegment(id: id, kind: .street, points: points)
 }

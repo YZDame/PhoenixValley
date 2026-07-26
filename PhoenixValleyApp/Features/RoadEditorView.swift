@@ -85,8 +85,16 @@ private struct ProjectSidebar: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button("新建地图", systemImage: "doc.badge.plus") {
-                        document.createNewMap()
+                    Menu("新建地图", systemImage: "doc.badge.plus") {
+                        Button("随机场景", systemImage: "dice") {
+                            document.createNewMap()
+                        }
+                        Divider()
+                        ForEach(TerrainScenario.allCases) { scenario in
+                            Button(scenario.displayName, systemImage: scenario.symbol) {
+                                document.createNewMap(scenario: scenario)
+                            }
+                        }
                     }
                     .disabled(document.terrainGenerationState.isGenerating)
                     .keyboardShortcut("n", modifiers: .command)
@@ -427,8 +435,10 @@ private struct RoadCanvasWorkspace: View {
     @Bindable var document: RoadDocumentStore
     @State private var isPaletteExpanded = true
     @State private var showsMapAppearance = false
-    @AppStorage("showsConstructionIssueOverlay")
-    private var showsConstructionIssueOverlay = true
+    @AppStorage("showsConstructionIssueOverlayV2")
+    private var showsConstructionIssueOverlay = false
+    @AppStorage("enablesAdvancedEngineeringAnalysis")
+    private var enablesAdvancedEngineeringAnalysis = false
     @State private var preparedExport: PreparedMapExport?
     @State private var isPresentingExporter = false
     @State private var isPreparingExport = false
@@ -437,10 +447,13 @@ private struct RoadCanvasWorkspace: View {
     var body: some View {
         RoadCanvasRepresentable(
             project: document.project,
-            pendingStructureReview: document.pendingStructureReview,
+            pendingStructureReview: enablesAdvancedEngineeringAnalysis
+                ? document.pendingStructureReview
+                : nil,
             selectedKind: document.selectedKind,
             selectedLevel: document.selectedLevel,
             isErasing: document.isErasing,
+            eraserMode: document.eraserMode,
             isSelecting: document.isSelecting,
             isEditingInterchange: document.isEditingInterchange,
             isAwaitingRampDrawing: document.isAwaitingRampDrawing,
@@ -453,7 +466,10 @@ private struct RoadCanvasWorkspace: View {
                    document.isAwaitingRampDrawing {
                     document.prepareRampDraft(points)
                 } else {
-                    document.addStroke(points)
+                    document.addStroke(
+                        points,
+                        requestsStructureReview: enablesAdvancedEngineeringAnalysis
+                    )
                 }
             },
             onEraseFinished: { request in document.eraseRoads(request) },
@@ -528,8 +544,12 @@ private struct RoadCanvasWorkspace: View {
                 MapAppearanceButton(
                     isPresented: $showsMapAppearance,
                     conflictCount: document.layerConflicts.count,
-                    engineeringIssueCount: document.engineeringIssues.count,
-                    constructionIssueCount: document.constructionIssues.count
+                    engineeringIssueCount: enablesAdvancedEngineeringAnalysis
+                        ? document.engineeringIssues.count
+                        : 0,
+                    constructionIssueCount: enablesAdvancedEngineeringAnalysis
+                        ? document.constructionIssues.count
+                        : 0
                 )
                     .popover(
                         isPresented: $showsMapAppearance,
@@ -538,6 +558,8 @@ private struct RoadCanvasWorkspace: View {
                     ) {
                         MapAppearancePopover(
                             document: document,
+                            enablesAdvancedEngineeringAnalysis:
+                                $enablesAdvancedEngineeringAnalysis,
                             showsConstructionIssueOverlay:
                                 $showsConstructionIssueOverlay
                         )
@@ -573,7 +595,11 @@ private struct RoadCanvasWorkspace: View {
 
     private var structureReviewPresentation: Binding<RoadStructureReviewRecord?> {
         Binding(
-            get: { document.pendingStructureReview },
+            get: {
+                enablesAdvancedEngineeringAnalysis
+                    ? document.pendingStructureReview
+                    : nil
+            },
             set: { _ in }
         )
     }
@@ -827,14 +853,12 @@ private struct RoadStructureReviewSheet: View {
             }
 
             HStack {
-                if !hasMandatoryBridge {
-                    Button("保留地面道路") {
-                        document.rejectStructureReview(id: review.id)
-                        dismiss()
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityIdentifier("reject-structure-plan")
+                Button("保留原道路") {
+                    document.rejectStructureReview(id: review.id)
+                    dismiss()
                 }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("reject-structure-plan")
 
                 Spacer()
 
@@ -871,12 +895,6 @@ private struct RoadStructureReviewSheet: View {
                 candidateID: candidate.id,
                 resolution: resolution
             )
-        }
-    }
-
-    private var hasMandatoryBridge: Bool {
-        review.plan.candidates.contains {
-            $0.evidence.triggers.contains(.water)
         }
     }
 
@@ -1075,6 +1093,7 @@ private struct MapAppearanceButton: View {
 
 private struct MapAppearancePopover: View {
     @Bindable var document: RoadDocumentStore
+    @Binding var enablesAdvancedEngineeringAnalysis: Bool
     @Binding var showsConstructionIssueOverlay: Bool
 
     var body: some View {
@@ -1104,6 +1123,23 @@ private struct MapAppearancePopover: View {
                     Toggle("地形", systemImage: "mountain.2", isOn: terrainSelection)
                     Toggle("等高线", systemImage: "lines.measurement.horizontal", isOn: contoursSelection)
                     Toggle("规划网格", systemImage: "grid", isOn: gridSelection)
+                }
+                .font(.subheadline)
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Toggle(
+                        "进阶工程分析",
+                        systemImage: "ruler",
+                        isOn: $enablesAdvancedEngineeringAnalysis
+                    )
+                    .accessibilityIdentifier("advanced-engineering-analysis-toggle")
+
+                    Text("开启后，新绘道路会分析桥梁、隧道、坡度和施工区段；自由绘制默认不受这些建议打断。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .font(.subheadline)
 
@@ -1186,7 +1222,8 @@ private struct MapAppearancePopover: View {
                     .font(.caption)
                 }
 
-                if !document.project.roads.isEmpty {
+                if enablesAdvancedEngineeringAnalysis
+                    && !document.project.roads.isEmpty {
                     Divider()
 
                     VStack(alignment: .leading, spacing: 8) {
@@ -1243,8 +1280,19 @@ private struct MapAppearancePopover: View {
 
                 Divider()
 
-                Button("创建随机地图", systemImage: "dice") {
-                    document.createNewMap()
+                Menu {
+                    Button("随机场景", systemImage: "dice") {
+                        document.createNewMap()
+                    }
+                    Divider()
+                    ForEach(TerrainScenario.allCases) { scenario in
+                        Button(scenario.displayName, systemImage: scenario.symbol) {
+                            document.createNewMap(scenario: scenario)
+                        }
+                    }
+                } label: {
+                    Label("创建场景地图", systemImage: "map")
+                        .frame(maxWidth: .infinity)
                 }
                 .disabled(document.terrainGenerationState.isGenerating)
                 .buttonStyle(.borderedProminent)
@@ -1710,7 +1758,7 @@ private struct CompactToolSummary: View {
             } else if document.isErasing {
                 Image(systemName: "eraser.line.dashed")
                     .foregroundStyle(.red)
-                Text("擦除")
+                Text("擦除·\(document.eraserMode.displayName)")
             } else {
                 RoadSwatch(kind: document.selectedKind)
                 Text(document.selectedKind.displayName)
@@ -1743,6 +1791,8 @@ private struct ToolControls: View {
 
                 Divider().frame(height: 36).padding(.horizontal, 4)
                 correctionSlider.frame(width: 104)
+            } else if document.isErasing {
+                eraserModePicker.frame(width: 180)
             } else {
                 levelPicker.frame(width: 220)
 
@@ -1834,6 +1884,16 @@ private struct ToolControls: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("erase-road-tool")
+    }
+
+    private var eraserModePicker: some View {
+        Picker("擦除方式", selection: $document.eraserMode) {
+            ForEach(RoadEraseMode.allCases) { mode in
+                Text(mode.displayName).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .accessibilityIdentifier("eraser-mode-picker")
     }
 
     private var selectionSummary: some View {

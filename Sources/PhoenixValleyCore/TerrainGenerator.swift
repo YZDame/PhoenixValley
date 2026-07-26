@@ -6,17 +6,20 @@ public struct TerrainGenerationRequest: Hashable, Sendable {
     public var gridWidth: Int
     public var gridHeight: Int
     public var generationVersion: Int
+    public var scenario: TerrainScenario
 
     public init(
         seed: UInt64,
         vertexCount: Int = 96,
-        gridWidth: Int = 129,
-        gridHeight: Int = 97
+        gridWidth: Int = 257,
+        gridHeight: Int = 193,
+        scenario: TerrainScenario = .island
     ) {
         self.seed = seed
         self.vertexCount = max(72, vertexCount)
         self.gridWidth = max(17, gridWidth)
         self.gridHeight = max(13, gridHeight)
+        self.scenario = scenario
         generationVersion = TerrainLayout.currentGenerationVersion
     }
 }
@@ -93,14 +96,16 @@ public enum TerrainGenerator {
     public static func generate(
         seed: UInt64,
         vertexCount: Int = 96,
-        gridWidth: Int = 129,
-        gridHeight: Int = 97
+        gridWidth: Int = 257,
+        gridHeight: Int = 193,
+        scenario: TerrainScenario = .island
     ) -> TerrainLayout {
         let request = TerrainGenerationRequest(
             seed: seed,
             vertexCount: vertexCount,
             gridWidth: gridWidth,
-            gridHeight: gridHeight
+            gridHeight: gridHeight,
+            scenario: scenario
         )
         do {
             return try generate(
@@ -151,14 +156,55 @@ public enum TerrainGenerator {
         let horizontalBase = 500 + generator.nextUnit() * 175
         let verticalBase = 350 + generator.nextUnit() * 135
         let rotation = (generator.nextUnit() - 0.5) * 0.5
-        let shoreline = makeShoreline(
-            center: center,
-            horizontalBase: horizontalBase,
-            verticalBase: verticalBase,
-            rotation: rotation,
-            vertexCount: request.vertexCount,
-            generator: &generator
-        )
+        let shoreline: [RoadPoint]
+        switch request.scenario {
+        case .island:
+            shoreline = makeShoreline(
+                center: center,
+                horizontalBase: horizontalBase,
+                verticalBase: verticalBase,
+                rotation: rotation,
+                vertexCount: request.vertexCount,
+                generator: &generator
+            )
+        case .coastalCity:
+            shoreline = makeCoastalShoreline(
+                vertexCount: request.vertexCount,
+                generator: &generator
+            )
+        case .continent:
+            let coastOnLeft = generator.nextUnit() > 0.5
+            shoreline = makeShoreline(
+                center: RoadPoint(
+                    x: coastOnLeft ? 1_720 : -120,
+                    y: 520 + generator.nextUnit() * 160
+                ),
+                horizontalBase: 1_380 + generator.nextUnit() * 260,
+                verticalBase: 760 + generator.nextUnit() * 180,
+                rotation: (generator.nextUnit() - 0.5) * 0.26,
+                vertexCount: request.vertexCount,
+                generator: &generator
+            )
+        case .riverAndLakes:
+            shoreline = makeShoreline(
+                center: RoadPoint(
+                    x: 720 + generator.nextUnit() * 160,
+                    y: 520 + generator.nextUnit() * 150
+                ),
+                horizontalBase: 810 + generator.nextUnit() * 190,
+                verticalBase: 590 + generator.nextUnit() * 145,
+                rotation: (generator.nextUnit() - 0.5) * 0.34,
+                vertexCount: request.vertexCount,
+                generator: &generator
+            )
+        default:
+            shoreline = [
+                RoadPoint(x: -80, y: -80),
+                RoadPoint(x: 1680, y: -80),
+                RoadPoint(x: 1680, y: 1280),
+                RoadPoint(x: -80, y: 1280),
+            ]
+        }
         try cancellationCheck?()
         progress?(TerrainGenerationProgress(phase: .landforms, fractionCompleted: 0.1))
 
@@ -193,6 +239,42 @@ public enum TerrainGenerator {
                     height: 0.22 + generator.nextUnit() * 0.16
                 )
             )
+        }
+
+        if request.scenario == .valley {
+            ridges = [
+                makeRidge(
+                    center: RoadPoint(x: 800, y: 260),
+                    direction: 0,
+                    length: 1_850,
+                    bend: 120,
+                    width: 150,
+                    height: 0.42
+                ),
+                makeRidge(
+                    center: RoadPoint(x: 800, y: 940),
+                    direction: 0,
+                    length: 1_850,
+                    bend: -120,
+                    width: 150,
+                    height: 0.42
+                ),
+            ]
+        } else if request.scenario == .mountains {
+            ridges.append(
+                makeRidge(
+                    center: RoadPoint(x: 820, y: 620),
+                    direction: primaryDirection + .pi / 2,
+                    length: 1_350,
+                    bend: 240,
+                    width: 115,
+                    height: 0.44
+                )
+            )
+        } else if request.scenario == .hills {
+            ridges = ridges.map {
+                Ridge(points: $0.points, width: $0.width * 1.65, height: $0.height * 0.48)
+            }
         }
 
         var valleys: [Ridge] = []
@@ -237,6 +319,9 @@ public enum TerrainGenerator {
         let height = request.gridHeight
         var elevations: [UInt16] = []
         elevations.reserveCapacity(width * height)
+        let drainageSeed = hashNoise(x: 31, y: 47, seed: seed)
+        let drainageRunsHorizontally = drainageSeed > 0.5
+        let drainageReversed = hashNoise(x: 53, y: 71, seed: seed) > 0.5
 
         for row in 0..<height {
             try cancellationCheck?()
@@ -251,7 +336,13 @@ public enum TerrainGenerator {
                 }
 
                 let coastDistance = distance(from: point, to: shoreline, closed: true)
-                var elevation = 0.215 + min(1, coastDistance / 230) * 0.095
+                let hasVisibleCoast = request.scenario == .island
+                    || request.scenario == .coastalCity
+                    || request.scenario == .continent
+                    || request.scenario == .riverAndLakes
+                var elevation = hasVisibleCoast
+                    ? 0.215 + min(1, coastDistance / 230) * 0.095
+                    : 0.33
 
                 for (index, ridge) in ridges.enumerated() {
                     let ridgeDistance = distance(from: point, to: ridge.points, closed: false)
@@ -275,25 +366,56 @@ public enum TerrainGenerator {
                     elevation -= exp(-pow(basinDistance / basin.radius, 2) * 0.5) * basin.depth
                 }
 
-                let broadRelief = fractalNoise(
+                if request.scenario == .basin {
+                    let basinDistance = hypot(point.x - 800, point.y - 600)
+                    elevation += min(0.22, abs(basinDistance - 420) / 900)
+                    elevation -= exp(-pow(basinDistance / 310, 2) * 0.5) * 0.12
+                }
+
+                let warpX = (fractalNoise(
                     x: point.x,
                     y: point.y,
+                    frequency: 0.00125,
+                    octaves: 3,
+                    seed: seed &+ 0x8EBC6AF09C88C6E3
+                ) - 0.5) * 210
+                let warpY = (fractalNoise(
+                    x: point.x,
+                    y: point.y,
+                    frequency: 0.00125,
+                    octaves: 3,
+                    seed: seed &+ 0x589965CC75374CC3
+                ) - 0.5) * 210
+                let broadRelief = fractalNoise(
+                    x: point.x + warpX,
+                    y: point.y + warpY,
                     frequency: 0.0018,
-                    octaves: 4,
+                    octaves: 5,
                     seed: seed &+ 0xA0761D6478BD642F
                 )
                 let localRelief = ridgedNoise(
-                    x: point.x,
-                    y: point.y,
+                    x: point.x + warpX * 0.45,
+                    y: point.y + warpY * 0.45,
                     frequency: 0.009,
                     seed: seed &+ 0xE7037ED1A0B428DB
                 )
-                elevation += (broadRelief - 0.5) * 0.12
-                elevation += (localRelief - 0.5) * 0.045
+                let reliefScale = request.scenario == .hills ? 0.55 : 1
+                elevation += (broadRelief - 0.5) * 0.12 * reliefScale
+                elevation += (localRelief - 0.5) * 0.045 * reliefScale
+
+                if request.scenario == .riverAndLakes {
+                    let progress = drainageRunsHorizontally
+                        ? point.x / 1_600
+                        : point.y / 1_200
+                    let downstreamProgress = drainageReversed ? 1 - progress : progress
+                    elevation += (1 - downstreamProgress) * 0.115
+                }
 
                 // Keep a narrow, low coastal shelf while preserving inland plains.
-                let coastalCeiling = 0.27 + min(1, coastDistance / 120) * 0.73
-                elevation = min(elevation, coastalCeiling)
+                if hasVisibleCoast {
+                    let coastalCeiling = 0.27 + min(1, coastDistance / 120) * 0.73
+                    elevation = min(elevation, coastalCeiling)
+                }
                 elevation = min(0.96, max(0.205, elevation))
                 elevations.append(UInt16((elevation * Double(UInt16.max)).rounded()))
             }
@@ -309,6 +431,18 @@ public enum TerrainGenerator {
             }
         }
 
+        if request.scenario == .riverAndLakes {
+            carveDrainageNetwork(
+                into: &elevations,
+                width: width,
+                height: height,
+                waterLevel: 0.2,
+                seed: seed,
+                runsHorizontally: drainageRunsHorizontally,
+                reversed: drainageReversed
+            )
+        }
+
         return TerrainLayout(
             seed: seed,
             shoreline: shoreline,
@@ -316,7 +450,8 @@ public enum TerrainGenerator {
             gridWidth: width,
             gridHeight: height,
             elevations: elevations,
-            waterLevel: 0.2
+            waterLevel: 0.2,
+            scenario: request.scenario
         )
     }
 
@@ -324,7 +459,202 @@ public enum TerrainGenerator {
         guard !terrain.hasElevationData
             || terrain.generationVersion < TerrainLayout.currentGenerationVersion
         else { return terrain }
-        return generate(seed: terrain.seed)
+        return generate(seed: terrain.seed, scenario: terrain.scenario)
+    }
+
+    private static func makeCoastalShoreline(
+        vertexCount: Int,
+        generator: inout SeededGenerator
+    ) -> [RoadPoint] {
+        let samples = max(36, vertexCount / 2)
+        let seaOnLeft = generator.nextUnit() > 0.5
+        var coast: [RoadPoint] = []
+        coast.reserveCapacity(samples + 3)
+        for index in 0..<samples {
+            let amount = Double(index) / Double(samples - 1)
+            let y = -60 + amount * 1_320
+            let baseX = 350
+                + sin(amount * .pi * 2.2 + generator.nextUnit() * 0.08) * 120
+                + sin(amount * .pi * 6.5) * 38
+            coast.append(
+                RoadPoint(
+                    x: seaOnLeft ? baseX : 1_600 - baseX,
+                    y: y
+                )
+            )
+        }
+        if seaOnLeft {
+            coast.append(RoadPoint(x: 1_680, y: 1_280))
+            coast.append(RoadPoint(x: 1_680, y: -80))
+        } else {
+            coast.append(RoadPoint(x: -80, y: 1_280))
+            coast.append(RoadPoint(x: -80, y: -80))
+        }
+        return coast
+    }
+
+    /// Builds a scale-aware dendritic water network on top of the height field.
+    ///
+    /// Every land cell contributes seeded rainfall to its lowest downstream
+    /// neighbour. Accumulated flow decides which branches become visible and
+    /// how wide they are. This is a directed D8-style approximation tailored to
+    /// the small canvas: it preserves drainage connectivity without running a
+    /// full hydraulic erosion simulation.
+    private static func carveDrainageNetwork(
+        into elevations: inout [UInt16],
+        width: Int,
+        height: Int,
+        waterLevel: Double,
+        seed: UInt64,
+        runsHorizontally: Bool,
+        reversed: Bool
+    ) {
+        guard width >= 3, height >= 3, elevations.count == width * height else { return }
+
+        let majorCount = runsHorizontally ? width : height
+        let lateralCount = runsHorizontally ? height : width
+        let cellWidth = 1_600 / Double(width - 1)
+        let cellHeight = 1_200 / Double(height - 1)
+        let cellCount = width * height
+        let waterValue = UInt16((waterLevel * Double(UInt16.max)).rounded())
+        var generator = SeededGenerator(seed: seed &+ 0xD1B54A32D192ED03)
+        var receiver = Array(repeating: -1, count: cellCount)
+        var accumulation = (0..<cellCount).map { index in
+            0.72 + hashNoise(
+                x: index % width,
+                y: index / width,
+                seed: seed &+ 0xDB4F0B9175AE2165
+            ) * 0.56
+        }
+
+        func coordinates(major: Int, lateral: Int) -> (column: Int, row: Int) {
+            let directedMajor = reversed ? majorCount - 1 - major : major
+            return runsHorizontally
+                ? (directedMajor, lateral)
+                : (lateral, directedMajor)
+        }
+
+        // Choose one downstream receiver per cell. Constraining receivers to
+        // the next major slice guarantees an acyclic graph while still allowing
+        // bends, confluences, and several tributary orders.
+        for major in 0..<(majorCount - 1) {
+            for lateral in 1..<(lateralCount - 1) {
+                let current = coordinates(major: major, lateral: lateral)
+                let currentIndex = current.row * width + current.column
+                guard elevations[currentIndex] > waterValue else { continue }
+                let currentElevation = Double(elevations[currentIndex]) / Double(UInt16.max)
+                var bestIndex = -1
+                var bestScore = Double.infinity
+                for delta in -2...2 {
+                    let candidate = min(lateralCount - 2, max(1, lateral + delta))
+                    let coordinate = coordinates(major: major + 1, lateral: candidate)
+                    let index = coordinate.row * width + coordinate.column
+                    let elevation = Double(elevations[index])
+                        / Double(UInt16.max)
+                    let uphillPenalty = max(0, elevation - currentElevation) * 5.2
+                    let diagonalPenalty = Double(abs(delta)) * 0.0014
+                    let terrainJitter = hashNoise(
+                        x: coordinate.column,
+                        y: coordinate.row,
+                        seed: seed &+ 0x94D049BB133111EB
+                    ) * 0.018
+                    let score = elevation + uphillPenalty + diagonalPenalty + terrainJitter
+                    if score < bestScore {
+                        bestScore = score
+                        bestIndex = index
+                    }
+                }
+                receiver[currentIndex] = bestIndex
+            }
+        }
+
+        // Upstream-to-downstream traversal accumulates rainfall at confluences.
+        for major in 0..<(majorCount - 1) {
+            for lateral in 1..<(lateralCount - 1) {
+                let current = coordinates(major: major, lateral: lateral)
+                let currentIndex = current.row * width + current.column
+                let downstream = receiver[currentIndex]
+                if downstream >= 0 {
+                    accumulation[downstream] += accumulation[currentIndex]
+                }
+            }
+        }
+
+        let streamThreshold = max(8, Double(cellCount) * 0.0062)
+        var lakeCandidates: [Int] = []
+        for major in 1..<(majorCount - 1) {
+            let progress = Double(major) / Double(max(1, majorCount - 1))
+            for lateral in 1..<(lateralCount - 1) {
+                let center = coordinates(major: major, lateral: lateral)
+                let centerIndex = center.row * width + center.column
+                let flow = accumulation[centerIndex]
+                guard flow >= streamThreshold, elevations[centerIndex] > waterValue else { continue }
+
+                let order = sqrt(flow / streamThreshold)
+                let channelRadius = min(9.2, 2.4 + order * 1.55)
+                if progress > 0.28, progress < 0.76, flow >= streamThreshold * 2.4 {
+                    lakeCandidates.append(centerIndex)
+                }
+
+            let columnRadius = max(1, Int(ceil(channelRadius / cellWidth)))
+            let rowRadius = max(1, Int(ceil(channelRadius / cellHeight)))
+            for rowOffset in -rowRadius...rowRadius {
+                for columnOffset in -columnRadius...columnRadius {
+                    let column = center.column + columnOffset
+                    let row = center.row + rowOffset
+                    guard column >= 0, column < width, row >= 0, row < height else { continue }
+                    let distance = hypot(
+                        Double(columnOffset) * cellWidth,
+                        Double(rowOffset) * cellHeight
+                    )
+                    guard distance <= channelRadius else { continue }
+                    let bankAmount = min(1, distance / max(channelRadius, 0.1))
+                    let carved = Double(waterValue) * (0.965 + bankAmount * 0.028)
+                    elevations[row * width + column] = min(
+                        elevations[row * width + column],
+                        UInt16(carved.rounded())
+                    )
+                }
+            }
+            }
+        }
+
+        let lakeCount = 1 + Int(generator.next() % 2)
+        for lakeIndex in 0..<min(lakeCount, lakeCandidates.count) {
+            let slot = min(
+                lakeCandidates.count - 1,
+                (lakeIndex * lakeCandidates.count / lakeCount)
+                    + Int(generator.next() % UInt64(max(1, lakeCandidates.count / lakeCount)))
+            )
+            let centerIndex = lakeCandidates[slot]
+            let center = (column: centerIndex % width, row: centerIndex / width)
+            let radiusX = 18 + generator.nextUnit() * 24
+            let radiusY = 14 + generator.nextUnit() * 20
+            let columnRadius = max(1, Int(ceil(radiusX / cellWidth)))
+            let rowRadius = max(1, Int(ceil(radiusY / cellHeight)))
+
+            for rowOffset in -rowRadius...rowRadius {
+                for columnOffset in -columnRadius...columnRadius {
+                    let column = center.column + columnOffset
+                    let row = center.row + rowOffset
+                    guard column >= 0, column < width, row >= 0, row < height else { continue }
+                    let normalizedDistance = hypot(
+                        Double(columnOffset) * cellWidth / radiusX,
+                        Double(rowOffset) * cellHeight / radiusY
+                    )
+                    let edgeVariation = 0.88 + hashNoise(
+                        x: column,
+                        y: row,
+                        seed: seed &+ UInt64(lakeIndex + 1) &* 0x9E3779B97F4A7C15
+                    ) * 0.18
+                    guard normalizedDistance <= edgeVariation else { continue }
+                    elevations[row * width + column] = min(
+                        elevations[row * width + column],
+                        UInt16(Double(waterValue) * 0.955)
+                    )
+                }
+            }
+        }
     }
 
     private static func makeShoreline(

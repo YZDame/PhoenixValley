@@ -1,18 +1,35 @@
 import Foundation
 
+public enum RoadEraseMode: String, CaseIterable, Hashable, Identifiable, Sendable {
+    case wholeRoad
+    case local
+
+    public var id: Self { self }
+
+    public var displayName: String {
+        switch self {
+        case .wholeRoad: "整条"
+        case .local: "局部"
+        }
+    }
+}
+
 public struct RoadEraseRequest: Hashable, Sendable {
     public var points: [RoadPoint]
     public var radius: Double
     public var eligibleRoadIDs: Set<UUID>
+    public var mode: RoadEraseMode
 
     public init(
         points: [RoadPoint],
         radius: Double,
-        eligibleRoadIDs: Set<UUID>
+        eligibleRoadIDs: Set<UUID>,
+        mode: RoadEraseMode = .local
     ) {
         self.points = points
         self.radius = max(0, radius)
         self.eligibleRoadIDs = eligibleRoadIDs
+        self.mode = mode
     }
 }
 
@@ -110,6 +127,19 @@ public extension RoadNetwork {
                     configuration: configuration
                 ).network,
                 affectedSourceRoadIDs: []
+            )
+        }
+
+        if request.mode == .wholeRoad {
+            return RoadNetworkEraseResult(
+                network: rebuilding(
+                    from: roads.filter {
+                        !affectedSourceRoadIDs.contains($0.sourceRoadID)
+                    },
+                    interchanges: interchanges,
+                    configuration: configuration
+                ).network,
+                affectedSourceRoadIDs: affectedSourceRoadIDs
             )
         }
 

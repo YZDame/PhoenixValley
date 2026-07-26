@@ -32,6 +32,7 @@ final class RoadDocumentStore {
     private(set) var groups: [ProjectGroup]
     var selectedKind: RoadKind = .arterial
     var selectedLevel: RoadLevel = .ground
+    var eraserMode: RoadEraseMode = .wholeRoad
     private(set) var activeTool: RoadEditorTool = .draw
     private(set) var selectedSourceRoadIDs: Set<UUID> = []
     private(set) var selectedInterchangeCrossingID: UUID?
@@ -124,6 +125,7 @@ final class RoadDocumentStore {
         if shouldMaterializePlaceholder || shouldRegenerateLoadedTerrain {
             scheduleTerrainGeneration(
                 seed: project.terrain.seed,
+                scenario: createdPlaceholder ? .continent : project.terrain.scenario,
                 purpose: .replaceExisting(projectID: project.id, targetName: project.name)
             )
         }
@@ -646,7 +648,10 @@ final class RoadDocumentStore {
         return true
     }
 
-    func addStroke(_ rawPoints: [RoadPoint]) {
+    func addStroke(
+        _ rawPoints: [RoadPoint],
+        requestsStructureReview: Bool = false
+    ) {
         let configuration = StrokeProcessingConfiguration(
             minimumSampleDistance: 1.2,
             smoothingPasses: correctionStrength < 0.35 ? 1 : 2,
@@ -708,7 +713,8 @@ final class RoadDocumentStore {
             return
         }
 
-        let structurePlan: AutoStructurePlan? = if selectedLevel == .ground {
+        let structurePlan: AutoStructurePlan? = if selectedLevel == .ground
+            && requestsStructureReview {
             AutoStructurePlanner.plan(
                 for: newRoad,
                 terrain: project.terrain,
@@ -1038,15 +1044,9 @@ final class RoadDocumentStore {
     }
 
     func rejectStructureReview(id: UUID) {
-        guard let review = project.structureReviews.first(where: {
+        guard project.structureReviews.contains(where: {
             $0.id == id && $0.status == .pending
         }) else { return }
-        guard !review.plan.candidates.contains(where: {
-            $0.evidence.triggers.contains(.water)
-        }) else {
-            discardPendingRoad(id: id)
-            return
-        }
 
         applyProjectEdit { project in
             guard let index = project.structureReviews.firstIndex(where: { $0.id == id }) else {
@@ -1113,13 +1113,17 @@ final class RoadDocumentStore {
         }
     }
 
-    func createNewMap() {
+    func createNewMap(scenario: TerrainScenario? = nil) {
         let seed = UInt64.random(in: 1...UInt64.max)
         let number = projects.count + 1
+        let selectedScenario = scenario
+            ?? TerrainScenario.allCases.randomElement()
+            ?? .continent
         scheduleTerrainGeneration(
             seed: seed,
+            scenario: selectedScenario,
             purpose: .createNew(
-                name: "新地图 \(number)",
+                name: "\(selectedScenario.displayName) \(number)",
                 groupID: project.groupID
             )
         )
@@ -1142,6 +1146,7 @@ final class RoadDocumentStore {
         if Self.needsTerrainRegeneration(selected.terrain) {
             scheduleTerrainGeneration(
                 seed: selected.terrain.seed,
+                scenario: selected.terrain.scenario,
                 purpose: .replaceExisting(projectID: selected.id, targetName: selected.name)
             )
         }
@@ -1203,6 +1208,7 @@ final class RoadDocumentStore {
                 projects = [project]
                 scheduleTerrainGeneration(
                     seed: seed,
+                    scenario: .continent,
                     purpose: .replaceExisting(projectID: project.id, targetName: project.name)
                 )
             }
@@ -1587,12 +1593,13 @@ final class RoadDocumentStore {
 
     private func scheduleTerrainGeneration(
         seed: UInt64,
+        scenario: TerrainScenario = .island,
         purpose: TerrainGenerationPurpose
     ) {
         terrainGenerationTask?.cancel()
 
         let requestID = UUID()
-        let request = TerrainGenerationRequest(seed: seed)
+        let request = TerrainGenerationRequest(seed: seed, scenario: scenario)
         terrainGenerationRequestID = requestID
         terrainGenerationState = .generating(
             targetName: purpose.targetName,
