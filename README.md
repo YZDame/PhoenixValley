@@ -1,28 +1,83 @@
-# 凤凰山谷（Phoenix Valley）
+<p align="center">
+  <img src="PhoenixValleyApp/Assets.xcassets/AppIcon.appiconset/PhoenixValley-AppIcon-1024.png" width="128" height="128" alt="Phoenix Valley app icon">
+</p>
 
-Phoenix Valley is an iPad-first road-network sketching sandbox. Apple Pencil draws semantic roads; fingers pan and zoom the terrain.
+<h1 align="center">Phoenix Valley</h1>
 
-## Current prototype
+<p align="center">
+  An iPad-first road-network sandbox for drawing terrain-aware transport maps with Apple Pencil.
+</p>
 
-- Four tools: motorway, arterial, street, and railway
-- Pencil-sweep eraser with multi-road preview and single-step undo
-- Ground, elevated, and tunnel levels
-- Stroke filtering, smoothing, simplification, direction snapping, and endpoint snapping
-- One-finger pan and two-finger zoom on iPad; one-finger drawing fallback in Simulator
-- Seeded geographic terrain with coherent coastlines, mountain chains, branches, saddles, valleys, basins, coastal plains, and contour lines
-- Topographic, planning, and monochrome map themes
-- Native collapsible iPad sidebar with a multi-map library
-- Persistent map groups with visible rename, duplicate, move, and delete actions
-- Native split-view sidebar control, a corner-aligned Apple Maps-style appearance popover, and a draggable Pencil palette that docks horizontally at the bottom or vertically at either side
-- Rename, duplicate, delete, undo, redo, and per-project JSON autosave
-- App Shortcuts for opening the canvas with a selected road tool or creating a random map
+<p align="center">
+  <a href="README.zh-Hans.md">中文 README</a>
+</p>
+
+## Overview
+
+Phoenix Valley is a native iPadOS planning game prototype about building road networks across generated terrain. It focuses on the tactile loop of sketching roads with Apple Pencil, reviewing the engineering consequences, and shaping a readable transport map over mountains, water, valleys, and crossings.
+
+The project is currently a local prototype, not an App Store release. It targets iPadOS 17 or later, with the core geometry and planning model packaged as a testable Swift module.
+
+## Experience
+
+- Draw motorway, arterial, street, and railway routes directly on the canvas.
+- Pan and zoom the terrain with touch while reserving Apple Pencil for road input.
+- Work with ground roads, elevated roads, tunnels, bridges, ramps, and explicit interchanges.
+- Review terrain-aware bridge, tunnel, slope, water, and crossing recommendations before applying them.
+- Edit existing networks with selection, marquee selection, moving, road-type changes, undo, redo, and local erasing.
+- Organize a multi-map library with groups, previews, rename, duplicate, move, and delete actions.
+- Switch between map styles including terrain, planning, monochrome, coastal blue, midnight, and forest themes.
+- Export finished maps as PNG, PDF, SVG, or GeoJSON.
+
+## iPadOS Design
+
+Phoenix Valley uses native Apple platform patterns instead of a custom desktop-style shell:
+
+- `NavigationSplitView` for the map library and canvas.
+- A draggable Pencil palette that docks to the bottom, left, or right edge.
+- Popovers and toolbar actions for appearance, export, editing, and project management.
+- App Shortcuts for starting the canvas with a selected road tool or creating a random map.
+- Local-first project storage with optional iCloud document container support in the app target.
+
+## Engineering Model
+
+The core model treats drawn strokes as semantic transport geometry rather than simple pixels. It maintains stable road sources, topology nodes and edges, directed traffic rules, structure transitions, bridge and tunnel engineering assets, and construction diagnostics. Terrain generation is seeded and deterministic, so map projects can be saved, tested, and reproduced.
+
+The Swift package contains tests for stroke processing, topology, terrain generation, bridge and tunnel planning, ramp planning, traffic rules, map export, layer visibility, and persistence compatibility.
+
+## Repository Layout
+
+```text
+PhoenixValleyApp/              Native iPadOS app target
+Sources/PhoenixValleyCore/     Road, terrain, topology, export, and planning logic
+Tests/PhoenixValleyCoreTests/  Core unit tests
+Tests/PhoenixValleyCoreSmoke/  Smoke test entry point
+Docs/                          Release, privacy, and App Store notes
+```
+
+## Requirements
+
+- macOS with the full Xcode application installed
+- iPadOS 17 or later target
+- Swift 6 toolchain from Xcode
+- Apple Developer signing setup for physical iPad installation
 
 ## Run
 
-1. Install the full Xcode application.
-2. Open `PhoenixValley.xcodeproj`.
-3. Select the `PhoenixValley` scheme and an iPad Simulator or connected iPad.
-4. Set your Development Team under Signing & Capabilities when installing on a physical iPad.
+1. Open `PhoenixValley.xcodeproj` in Xcode.
+2. Select the `PhoenixValley` scheme.
+3. Choose an iPad Simulator or a connected iPad.
+4. Set your Development Team under Signing & Capabilities when installing on a physical device.
 5. Build and run.
 
-The app targets iPadOS 17 or later. The core geometry module is also a Swift package and can be tested independently with `swift test` in a correctly matched Xcode toolchain.
+## Test
+
+Run the core package tests with a matching Xcode Swift toolchain:
+
+```bash
+swift test
+```
+
+## Status
+
+Phoenix Valley is under active development. The current prototype has a functioning drawing canvas, generated terrain, topology-aware road editing, bridge and tunnel recommendations, interchange editing, traffic rules, project persistence, exports, and privacy documentation. Remaining work includes physical iPad Pencil testing, richer terrain systems, Apple Pencil advanced gestures, custom styles, traffic simulation, and formal App Store release work.
