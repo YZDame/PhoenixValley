@@ -146,33 +146,47 @@ public enum MapExporter {
             height: canvasHeight
         )
         let background = project.layerVisibility.showsTerrain
+            && project.terrain.scenario.hasOceanBoundary
             ? palette.water
             : palette.plain
         background.setFill(in: context)
         context.fill(fullCanvas)
 
-        if project.layerVisibility.showsTerrain,
-           let shoreline = shorelinePath(project.terrain.shoreline) {
-            palette.plain.setFill(in: context)
-            context.addPath(shoreline)
-            context.fillPath()
+        if project.layerVisibility.showsTerrain {
+            if project.terrain.scenario.hasOceanBoundary,
+               let shoreline = shorelinePath(project.terrain.shoreline) {
+                palette.plain.setFill(in: context)
+                context.addPath(shoreline)
+                context.fillPath()
 
-            context.saveGState()
-            context.addPath(shoreline)
-            context.clip()
-            drawElevation(project.terrain, palette: palette, in: context)
-            if project.showsGrid {
-                drawGrid(color: palette.grid, in: context)
-            }
-            if project.showsContours {
-                drawContours(project.terrain, color: palette.contour, in: context)
-            }
-            context.restoreGState()
+                context.saveGState()
+                context.addPath(shoreline)
+                context.clip()
+                drawElevation(project.terrain, palette: palette, in: context)
+                if project.showsGrid {
+                    drawGrid(color: palette.grid, in: context)
+                }
+                if project.showsContours {
+                    drawContours(project.terrain, color: palette.contour, in: context)
+                }
+                context.restoreGState()
 
-            palette.shoreline.setStroke(in: context)
-            context.setLineWidth(1.5)
-            context.addPath(shoreline)
-            context.strokePath()
+                palette.shoreline.setStroke(in: context)
+                context.setLineWidth(1.5)
+                context.addPath(shoreline)
+                context.strokePath()
+            } else {
+                context.saveGState()
+                context.clip(to: fullCanvas)
+                drawElevation(project.terrain, palette: palette, in: context)
+                if project.showsGrid {
+                    drawGrid(color: palette.grid, in: context)
+                }
+                if project.showsContours {
+                    drawContours(project.terrain, color: palette.contour, in: context)
+                }
+                context.restoreGState()
+            }
         }
 
         let engineeringStructures = visibleEngineeringStructures(in: project)
@@ -613,6 +627,7 @@ public enum MapExporter {
         let palette = ExportPalette(theme: project.theme)
         var body: [String] = []
         let background = project.layerVisibility.showsTerrain
+            && project.terrain.scenario.hasOceanBoundary
             ? palette.water
             : palette.plain
         body.append(
@@ -620,7 +635,9 @@ public enum MapExporter {
         )
 
         let shoreData = svgPathData(project.terrain.shoreline, closes: true)
-        if project.layerVisibility.showsTerrain, !shoreData.isEmpty {
+        if project.layerVisibility.showsTerrain,
+           project.terrain.scenario.hasOceanBoundary,
+           !shoreData.isEmpty {
             body.append(
                 """
                 <defs>
@@ -649,6 +666,26 @@ public enum MapExporter {
             body.append(
                 #"<path d="\#(shoreData)" fill="none" stroke="\#(palette.shoreline.hex)" stroke-width="1.5"\#(palette.shoreline.opacityAttribute("stroke"))/>"#
             )
+        } else if project.layerVisibility.showsTerrain {
+            body.append(
+                """
+                <defs>
+                  <filter id="terrain-smooth" x="-2%" y="-2%" width="104%" height="104%">
+                    <feGaussianBlur stdDeviation="7.5"/>
+                  </filter>
+                </defs>
+                """
+            )
+            body.append(#"<g filter="url(#terrain-smooth)">"#)
+            appendSVGElevation(
+                project.terrain,
+                palette: palette,
+                to: &body
+            )
+            body.append("</g>")
+            if project.showsGrid {
+                appendSVGGrid(color: palette.grid, to: &body)
+            }
         }
 
         let engineeringStructures = visibleEngineeringStructures(in: project)

@@ -146,16 +146,26 @@ import Testing
     #expect(Set(terrains.map(\.elevations)).count == terrains.count)
 }
 
-@Test func continentAndRiverScenariosDoNotReuseTheSameOuterBoundary() {
+@Test func onlyOceanScenariosGenerateAnOuterCoastline() {
     let seed: UInt64 = 91_827
     let continent = TerrainGenerator.generate(seed: seed, scenario: .continent)
     let river = TerrainGenerator.generate(seed: seed, scenario: .riverAndLakes)
     let valley = TerrainGenerator.generate(seed: seed, scenario: .valley)
+    let island = TerrainGenerator.generate(seed: seed, scenario: .island)
+    let coastalCity = TerrainGenerator.generate(seed: seed, scenario: .coastalCity)
 
-    #expect(continent.shoreline != river.shoreline)
-    #expect(river.shoreline != valley.shoreline)
-    #expect(continent.shoreline.count > 20)
-    #expect(river.shoreline.count > 20)
+    let fullCanvasBoundary = [
+        RoadPoint(x: 0, y: 0),
+        RoadPoint(x: 1_600, y: 0),
+        RoadPoint(x: 1_600, y: 1_200),
+        RoadPoint(x: 0, y: 1_200),
+    ]
+    #expect(continent.shoreline == fullCanvasBoundary)
+    #expect(river.shoreline == fullCanvasBoundary)
+    #expect(valley.shoreline == fullCanvasBoundary)
+    #expect(island.shoreline.count > 20)
+    #expect(coastalCity.shoreline.count > 20)
+    #expect(island.shoreline != coastalCity.shoreline)
 }
 
 @Test func drainageNetworkContainsMultipleConnectedHeadwaterBranches() {

@@ -62,6 +62,7 @@ struct ProjectFileLoadDiagnostic: Identifiable, Error, Hashable, LocalizedError,
 struct ProjectFileStore {
     private let fileManager: FileManager
     private let legacyFileName = "current-road-project.json"
+    private let iCloudContainerIdentifier = "iCloud.com.leyudame.PhoenixValley"
 
     init(fileManager: FileManager = .default) {
         self.fileManager = fileManager
@@ -72,10 +73,7 @@ struct ProjectFileStore {
     /// are still thrown to the caller.
     func loadLibrary() throws -> ProjectLibraryLoadResult {
         let directory = try projectsDirectory()
-        let urls = try fileManager.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: nil
-        )
+        let urls = try coordinatedDirectoryContents(at: directory)
         .filter { $0.pathExtension == "json" }
         .sorted { $0.lastPathComponent < $1.lastPathComponent }
 
@@ -117,27 +115,27 @@ struct ProjectFileStore {
         let url = try projectsDirectory()
             .appending(path: "\(project.id.uuidString).phoenixvalley.json")
         let data = try JSONEncoder.phoenixValley.encode(project)
-        try data.write(to: url, options: .atomic)
+        try coordinatedWrite(data, to: url)
     }
 
     func loadGroups() throws -> [ProjectGroup] {
         let url = try baseDirectory().appending(path: "library-groups.json")
         guard fileManager.fileExists(atPath: url.path) else { return [] }
-        let data = try Data(contentsOf: url)
+        let data = try coordinatedRead(at: url)
         return try JSONDecoder.phoenixValley.decode([ProjectGroup].self, from: data)
     }
 
     func saveGroups(_ groups: [ProjectGroup]) throws {
         let url = try baseDirectory().appending(path: "library-groups.json")
         let data = try JSONEncoder.phoenixValley.encode(groups)
-        try data.write(to: url, options: .atomic)
+        try coordinatedWrite(data, to: url)
     }
 
     func delete(_ project: RoadProject) throws {
         let url = try projectsDirectory()
             .appending(path: "\(project.id.uuidString).phoenixvalley.json")
         guard fileManager.fileExists(atPath: url.path) else { return }
-        try fileManager.removeItem(at: url)
+        try coordinatedDelete(at: url)
     }
 
     private func projectsDirectory() throws -> URL {
@@ -147,6 +145,23 @@ struct ProjectFileStore {
     }
 
     private func baseDirectory() throws -> URL {
+        let localDirectory = try localBaseDirectory()
+        guard fileManager.ubiquityIdentityToken != nil,
+              let container = fileManager.url(
+                forUbiquityContainerIdentifier: iCloudContainerIdentifier
+              )
+        else {
+            return localDirectory
+        }
+
+        let directory = container
+            .appending(path: "Documents", directoryHint: .isDirectory)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        try migrateLocalLibraryIfNeeded(from: localDirectory, to: directory)
+        return directory
+    }
+
+    private func localBaseDirectory() throws -> URL {
         let directory = try fileManager.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
@@ -157,12 +172,132 @@ struct ProjectFileStore {
         return directory
     }
 
+    private func migrateLocalLibraryIfNeeded(
+        from localDirectory: URL,
+        to cloudDirectory: URL
+    ) throws {
+        let localProjects = localDirectory
+            .appending(path: "Projects", directoryHint: .isDirectory)
+        let cloudProjects = cloudDirectory
+            .appending(path: "Projects", directoryHint: .isDirectory)
+        if fileManager.fileExists(atPath: localProjects.path) {
+            try fileManager.createDirectory(
+                at: cloudProjects,
+                withIntermediateDirectories: true
+            )
+            for source in try fileManager.contentsOfDirectory(
+                at: localProjects,
+                includingPropertiesForKeys: nil
+            ) where source.pathExtension == "json" {
+                let destination = cloudProjects.appending(path: source.lastPathComponent)
+                guard !fileManager.fileExists(atPath: destination.path) else { continue }
+                try coordinatedWrite(Data(contentsOf: source), to: destination)
+            }
+        }
+
+        for fileName in ["library-groups.json", legacyFileName] {
+            let source = localDirectory.appending(path: fileName)
+            let destination = cloudDirectory.appending(path: fileName)
+            guard fileManager.fileExists(atPath: source.path),
+                  !fileManager.fileExists(atPath: destination.path)
+            else { continue }
+            try coordinatedWrite(Data(contentsOf: source), to: destination)
+        }
+    }
+
+    private func coordinatedDirectoryContents(at directory: URL) throws -> [URL] {
+        var coordinationError: NSError?
+        var result: Result<[URL], Error>?
+        NSFileCoordinator().coordinate(
+            readingItemAt: directory,
+            options: .withoutChanges,
+            error: &coordinationError
+        ) { coordinatedURL in
+            result = Result {
+                try fileManager.contentsOfDirectory(
+                    at: coordinatedURL,
+                    includingPropertiesForKeys: nil
+                )
+            }
+        }
+        if let coordinationError {
+            throw coordinationError
+        }
+        return try result?.get() ?? []
+    }
+
+    private func coordinatedRead(at url: URL) throws -> Data {
+        if fileManager.isUbiquitousItem(at: url) {
+            try fileManager.startDownloadingUbiquitousItem(at: url)
+        }
+        var coordinationError: NSError?
+        var result: Result<Data, Error>?
+        NSFileCoordinator().coordinate(
+            readingItemAt: url,
+            options: .withoutChanges,
+            error: &coordinationError
+        ) { coordinatedURL in
+            result = Result { try Data(contentsOf: coordinatedURL) }
+        }
+        if let coordinationError {
+            throw coordinationError
+        }
+        guard let result else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        return try result.get()
+    }
+
+    private func coordinatedWrite(_ data: Data, to url: URL) throws {
+        var coordinationError: NSError?
+        var writeError: Error?
+        NSFileCoordinator().coordinate(
+            writingItemAt: url,
+            options: .forReplacing,
+            error: &coordinationError
+        ) { coordinatedURL in
+            do {
+                try data.write(to: coordinatedURL, options: .atomic)
+            } catch {
+                writeError = error
+            }
+        }
+        if let coordinationError {
+            throw coordinationError
+        }
+        if let writeError {
+            throw writeError
+        }
+    }
+
+    private func coordinatedDelete(at url: URL) throws {
+        var coordinationError: NSError?
+        var deleteError: Error?
+        NSFileCoordinator().coordinate(
+            writingItemAt: url,
+            options: .forDeleting,
+            error: &coordinationError
+        ) { coordinatedURL in
+            do {
+                try fileManager.removeItem(at: coordinatedURL)
+            } catch {
+                deleteError = error
+            }
+        }
+        if let coordinationError {
+            throw coordinationError
+        }
+        if let deleteError {
+            throw deleteError
+        }
+    }
+
     private func loadProject(
         at url: URL
     ) -> Result<RoadProject, ProjectFileLoadDiagnostic> {
         let data: Data
         do {
-            data = try Data(contentsOf: url)
+            data = try coordinatedRead(at: url)
         } catch {
             return .failure(
                 ProjectFileLoadDiagnostic(

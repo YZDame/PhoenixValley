@@ -243,10 +243,15 @@ public enum TerrainScenario: String, CaseIterable, Codable, Hashable, Identifiab
         case .riverAndLakes: "drop"
         }
     }
+
+    /// Whether the editable-region boundary represents an actual coastline.
+    public var hasOceanBoundary: Bool {
+        self == .island || self == .coastalCity
+    }
 }
 
 public struct TerrainLayout: Codable, Hashable, Sendable {
-    public static let currentGenerationVersion = 5
+    public static let currentGenerationVersion = 6
 
     public var seed: UInt64
     public var shoreline: [RoadPoint]

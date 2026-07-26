@@ -269,6 +269,9 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
     private weak var panGesture: UIPanGestureRecognizer?
     private var scaleBarHideWorkItem: DispatchWorkItem?
     private var isScaleBarVisible = false
+    private var minimumZoomHintHideWorkItem: DispatchWorkItem?
+    private var isMinimumZoomHintVisible = false
+    private var didShowMinimumZoomHintForGesture = false
 
     #if targetEnvironment(simulator)
     private let allowsFingerDrawing = true
@@ -310,7 +313,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
     override func layoutSubviews() {
         super.layoutSubviews()
         guard !hasPositionedInitialMap, bounds.width > 0, bounds.height > 0 else { return }
-        zoomScale = min(bounds.width / 1600, bounds.height / 1200) * 0.92
+        zoomScale = max(bounds.width / 1600, bounds.height / 1200)
         translation = CGPoint(
             x: bounds.midX - 800 * zoomScale,
             y: bounds.midY - 600 * zoomScale
@@ -323,7 +326,11 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         guard let context = UIGraphicsGetCurrentContext() else { return }
         let palette = theme.terrainPalette
         context.setFillColor(
-            (showsTerrain ? palette.water : palette.plain).cgColor
+            (
+                showsTerrain && terrain.scenario.hasOceanBoundary
+                    ? palette.water
+                    : UIColor.systemBackground
+            ).cgColor
         )
         context.fill(bounds)
 
@@ -365,6 +372,9 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         context.restoreGState()
         if isScaleBarVisible {
             drawScaleBar(in: context)
+        }
+        if isMinimumZoomHintVisible {
+            drawMinimumZoomHint()
         }
     }
 
@@ -468,6 +478,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         let delta = recognizer.translation(in: self)
         translation.x += delta.x
         translation.y += delta.y
+        constrainTranslation()
         recognizer.setTranslation(.zero, in: self)
         refreshAccessibilityElements()
         setNeedsDisplay()
@@ -475,6 +486,9 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
 
     @objc private func handlePinch(_ recognizer: UIPinchGestureRecognizer) {
         updateNavigationState(for: recognizer)
+        if recognizer.state == .began {
+            didShowMinimumZoomHintForGesture = false
+        }
         if recognizer.state == .began || recognizer.state == .changed {
             showScaleBar()
         } else if recognizer.state == .ended
@@ -488,12 +502,17 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         guard recognizer.numberOfTouches >= 2 else { return }
         let anchor = recognizer.location(in: self)
         let worldAtAnchor = worldPoint(for: anchor)
-        let nextScale = min(4, max(0.2, zoomScale * recognizer.scale))
+        let proposedScale = zoomScale * recognizer.scale
+        let nextScale = min(4, max(minimumZoomScale, proposedScale))
         zoomScale = nextScale
         translation = CGPoint(
             x: anchor.x - worldAtAnchor.x * nextScale,
             y: anchor.y - worldAtAnchor.y * nextScale
         )
+        constrainTranslation()
+        if proposedScale < minimumZoomScale - 0.001 {
+            showMinimumZoomHint()
+        }
         recognizer.scale = 1
         refreshAccessibilityElements()
         setNeedsDisplay()
@@ -513,6 +532,77 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         }
         scaleBarHideWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: workItem)
+    }
+
+    private var minimumZoomScale: CGFloat {
+        guard bounds.width > 0, bounds.height > 0 else { return 0.2 }
+        return min(bounds.width / 1600, bounds.height / 1200) * 0.92
+    }
+
+    private func constrainTranslation() {
+        let contentWidth = 1600 * zoomScale
+        let contentHeight = 1200 * zoomScale
+        let overscroll: CGFloat = 36
+
+        if contentWidth <= bounds.width {
+            translation.x = (bounds.width - contentWidth) / 2
+        } else {
+            translation.x = min(
+                overscroll,
+                max(bounds.width - contentWidth - overscroll, translation.x)
+            )
+        }
+
+        if contentHeight <= bounds.height {
+            translation.y = (bounds.height - contentHeight) / 2
+        } else {
+            translation.y = min(
+                overscroll,
+                max(bounds.height - contentHeight - overscroll, translation.y)
+            )
+        }
+    }
+
+    private func showMinimumZoomHint() {
+        guard !didShowMinimumZoomHintForGesture else { return }
+        didShowMinimumZoomHintForGesture = true
+        minimumZoomHintHideWorkItem?.cancel()
+        isMinimumZoomHintVisible = true
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        UIAccessibility.post(
+            notification: .announcement,
+            argument: "已显示完整可编辑区域，不能再缩小"
+        )
+        setNeedsDisplay()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.isMinimumZoomHintVisible = false
+            self?.setNeedsDisplay()
+        }
+        minimumZoomHintHideWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.35, execute: workItem)
+    }
+
+    private func drawMinimumZoomHint() {
+        let message = "已显示完整可编辑区域"
+        let font = UIFont.preferredFont(forTextStyle: .footnote)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: UIColor.label,
+        ]
+        let textSize = (message as NSString).size(withAttributes: attributes)
+        let pill = CGRect(
+            x: bounds.midX - textSize.width / 2 - 14,
+            y: 66,
+            width: textSize.width + 28,
+            height: textSize.height + 14
+        )
+        UIColor.secondarySystemBackground.withAlphaComponent(0.94).setFill()
+        UIBezierPath(roundedRect: pill, cornerRadius: pill.height / 2).fill()
+        (message as NSString).draw(
+            at: CGPoint(x: pill.minX + 14, y: pill.minY + 7),
+            withAttributes: attributes
+        )
     }
 
     private func shouldHandleContentTouch(
@@ -1257,6 +1347,22 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
 
     private func drawTerrainContent(in context: CGContext) {
         let palette = theme.terrainPalette
+        if !terrain.scenario.hasOceanBoundary {
+            context.setFillColor(palette.plain.cgColor)
+            context.fill(CGRect(x: 0, y: 0, width: 1600, height: 1200))
+            context.saveGState()
+            context.clip(to: CGRect(x: 0, y: 0, width: 1600, height: 1200))
+            drawElevationBands(in: context, palette: palette)
+            if showsGrid {
+                drawGrid(in: context, color: palette.grid)
+            }
+            if showsContours {
+                drawContours(in: context, color: palette.contour)
+            }
+            context.restoreGState()
+            return
+        }
+
         context.setFillColor(palette.water.cgColor)
         context.fill(CGRect(x: 0, y: 0, width: 1600, height: 1200))
 

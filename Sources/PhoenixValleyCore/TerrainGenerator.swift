@@ -81,6 +81,13 @@ public actor TerrainGenerationCache {
 }
 
 public enum TerrainGenerator {
+    private static let fullCanvasBoundary = [
+        RoadPoint(x: 0, y: 0),
+        RoadPoint(x: 1_600, y: 0),
+        RoadPoint(x: 1_600, y: 1_200),
+        RoadPoint(x: 0, y: 1_200),
+    ]
+
     private struct Ridge {
         let points: [RoadPoint]
         let width: Double
@@ -172,38 +179,10 @@ public enum TerrainGenerator {
                 vertexCount: request.vertexCount,
                 generator: &generator
             )
-        case .continent:
-            let coastOnLeft = generator.nextUnit() > 0.5
-            shoreline = makeShoreline(
-                center: RoadPoint(
-                    x: coastOnLeft ? 1_720 : -120,
-                    y: 520 + generator.nextUnit() * 160
-                ),
-                horizontalBase: 1_380 + generator.nextUnit() * 260,
-                verticalBase: 760 + generator.nextUnit() * 180,
-                rotation: (generator.nextUnit() - 0.5) * 0.26,
-                vertexCount: request.vertexCount,
-                generator: &generator
-            )
-        case .riverAndLakes:
-            shoreline = makeShoreline(
-                center: RoadPoint(
-                    x: 720 + generator.nextUnit() * 160,
-                    y: 520 + generator.nextUnit() * 150
-                ),
-                horizontalBase: 810 + generator.nextUnit() * 190,
-                verticalBase: 590 + generator.nextUnit() * 145,
-                rotation: (generator.nextUnit() - 0.5) * 0.34,
-                vertexCount: request.vertexCount,
-                generator: &generator
-            )
+        case .continent, .riverAndLakes:
+            shoreline = fullCanvasBoundary
         default:
-            shoreline = [
-                RoadPoint(x: -80, y: -80),
-                RoadPoint(x: 1680, y: -80),
-                RoadPoint(x: 1680, y: 1280),
-                RoadPoint(x: -80, y: 1280),
-            ]
+            shoreline = fullCanvasBoundary
         }
         try cancellationCheck?()
         progress?(TerrainGenerationProgress(phase: .landforms, fractionCompleted: 0.1))
@@ -336,10 +315,7 @@ public enum TerrainGenerator {
                 }
 
                 let coastDistance = distance(from: point, to: shoreline, closed: true)
-                let hasVisibleCoast = request.scenario == .island
-                    || request.scenario == .coastalCity
-                    || request.scenario == .continent
-                    || request.scenario == .riverAndLakes
+                let hasVisibleCoast = request.scenario.hasOceanBoundary
                 var elevation = hasVisibleCoast
                     ? 0.215 + min(1, coastDistance / 230) * 0.095
                     : 0.33
@@ -580,7 +556,10 @@ public enum TerrainGenerator {
             }
         }
 
-        let streamThreshold = max(8, Double(cellCount) * 0.0062)
+        // A full-canvas landmass contributes more drainage cells than the old
+        // inset land polygon. Raise the threshold so rivers stay narrow instead
+        // of turning the map edge into a broad wet band.
+        let streamThreshold = max(8, Double(cellCount) * 0.0122)
         var lakeCandidates: [Int] = []
         for major in 1..<(majorCount - 1) {
             let progress = Double(major) / Double(max(1, majorCount - 1))
