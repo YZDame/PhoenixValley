@@ -18,6 +18,8 @@ Phoenix Valley is a native iPadOS planning game prototype about building road ne
 
 The project is currently a local prototype, not an App Store release. It targets iPadOS 17 or later, with the core geometry and planning model packaged as a testable Swift module.
 
+![IMG_0916](https://pauline.oss-cn-shenzhen.aliyuncs.com/img/IMG_0916.PNG)
+
 ## Experience
 
 - Draw motorway, arterial, street, and railway routes directly on the canvas.

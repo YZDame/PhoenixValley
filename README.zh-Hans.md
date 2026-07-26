@@ -18,6 +18,8 @@
 
 当前项目仍是本地原型，尚不是 App Store 正式发布版本。应用目标平台为 iPadOS 17 或更高版本，核心几何、地形和路网规划逻辑以 Swift Package 形式组织，可独立测试。
 
+![IMG_0916](https://pauline.oss-cn-shenzhen.aliyuncs.com/img/IMG_0916.PNG)
+
 ## 核心体验
 
 - 用 Apple Pencil 绘制高速、主干道、街道和铁路。
