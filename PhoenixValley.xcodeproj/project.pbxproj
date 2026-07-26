@@ -15,6 +15,10 @@
 		A10000000000000000000006 /* AppIntentRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* AppIntentRouter.swift */; };
 		A10000000000000000000007 /* PhoenixValleyIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* PhoenixValleyIntents.swift */; };
 		A10000000000000000000008 /* PhoenixValleyCore in Frameworks */ = {isa = PBXBuildFile; productRef = A90000000000000000000002 /* PhoenixValleyCore */; };
+		A10000000000000000000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009 /* Assets.xcassets */; };
+		A1000000000000000000000A /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000A /* PrivacyInfo.xcprivacy */; };
+		A1000000000000000000000B /* RoadSelectionInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000B /* RoadSelectionInspector.swift */; };
+		A1000000000000000000000C /* RoadInterchangeInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000C /* RoadInterchangeInspector.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -26,6 +30,10 @@
 		A20000000000000000000006 /* AppIntentRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIntentRouter.swift; sourceTree = "<group>"; };
 		A20000000000000000000007 /* PhoenixValleyIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoenixValleyIntents.swift; sourceTree = "<group>"; };
 		A20000000000000000000008 /* PhoenixValley.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PhoenixValley.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000009 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A2000000000000000000000A /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		A2000000000000000000000B /* RoadSelectionInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoadSelectionInspector.swift; sourceTree = "<group>"; };
+		A2000000000000000000000C /* RoadInterchangeInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoadInterchangeInspector.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -56,6 +64,8 @@
 				A40000000000000000000005 /* Features */,
 				A40000000000000000000006 /* Persistence */,
 				A40000000000000000000008 /* SystemIntents */,
+				A20000000000000000000009 /* Assets.xcassets */,
+				A2000000000000000000000A /* PrivacyInfo.xcprivacy */,
 			);
 			path = PhoenixValleyApp;
 			sourceTree = "<group>";
@@ -77,6 +87,8 @@
 			children = (
 				A20000000000000000000002 /* RoadEditorView.swift */,
 				A20000000000000000000003 /* RoadDocumentStore.swift */,
+				A2000000000000000000000B /* RoadSelectionInspector.swift */,
+				A2000000000000000000000C /* RoadInterchangeInspector.swift */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -152,7 +164,10 @@
 		A70000000000000000000001 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = ();
+			files = (
+				A10000000000000000000009 /* Assets.xcassets in Resources */,
+				A1000000000000000000000A /* PrivacyInfo.xcprivacy in Resources */,
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
@@ -169,6 +184,8 @@
 				A10000000000000000000005 /* RoadCanvasView.swift in Sources */,
 				A10000000000000000000006 /* AppIntentRouter.swift in Sources */,
 				A10000000000000000000007 /* PhoenixValleyIntents.swift in Sources */,
+				A1000000000000000000000B /* RoadSelectionInspector.swift in Sources */,
+				A1000000000000000000000C /* RoadInterchangeInspector.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -207,6 +224,7 @@
 		B10000000000000000000003 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
@@ -234,6 +252,7 @@
 		B10000000000000000000004 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";

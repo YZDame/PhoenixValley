@@ -16,12 +16,39 @@ public enum RoadKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .railway: "铁路"
         }
     }
+
+    public var defaultPriority: RoadPriority {
+        switch self {
+        case .motorway: .motorway
+        case .arterial: .arterial
+        case .street: .local
+        case .railway: .railway
+        }
+    }
 }
 
 public enum RoadLevel: Int, Codable, CaseIterable, Sendable {
     case tunnel = -1
     case ground = 0
     case elevated = 1
+}
+
+public enum RoadDirection: String, Codable, CaseIterable, Sendable {
+    case bidirectional
+    case forward
+    case reverse
+}
+
+public enum RoadPriority: Int, Codable, CaseIterable, Comparable, Sendable {
+    case local = 100
+    case collector = 200
+    case arterial = 300
+    case motorway = 400
+    case railway = 500
+
+    public static func < (lhs: Self, rhs: Self) -> Bool {
+        lhs.rawValue < rhs.rawValue
+    }
 }
 
 public enum MapTheme: String, Codable, CaseIterable, Identifiable, Sendable {
@@ -46,22 +73,136 @@ public enum MapTheme: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 }
 
+public struct MapLayerVisibility: Codable, Hashable, Sendable {
+    public var showsTerrain: Bool
+    public var hiddenRoadKinds: Set<RoadKind>
+
+    public init(
+        showsTerrain: Bool = true,
+        hiddenRoadKinds: Set<RoadKind> = []
+    ) {
+        self.showsTerrain = showsTerrain
+        self.hiddenRoadKinds = hiddenRoadKinds
+    }
+
+    public func isVisible(_ kind: RoadKind) -> Bool {
+        !hiddenRoadKinds.contains(kind)
+    }
+
+    public mutating func setVisible(_ isVisible: Bool, for kind: RoadKind) {
+        if isVisible {
+            hiddenRoadKinds.remove(kind)
+        } else {
+            hiddenRoadKinds.insert(kind)
+        }
+    }
+}
+
+public struct MapScale: Codable, Hashable, Sendable {
+    public static let canvasWidth = 1_600.0
+    public static let canvasHeight = 1_200.0
+    public static let standard = MapScale(metersPerPoint: 1)
+
+    public var metersPerPoint: Double
+
+    public init(metersPerPoint: Double = 1) {
+        self.metersPerPoint = min(10, max(0.1, metersPerPoint))
+    }
+
+    public var widthMeters: Double {
+        Self.canvasWidth * metersPerPoint
+    }
+
+    public var heightMeters: Double {
+        Self.canvasHeight * metersPerPoint
+    }
+
+    public func meters(forCanvasDistance distance: Double) -> Double {
+        distance * metersPerPoint
+    }
+
+    public func canvasDistance(forMeters distance: Double) -> Double {
+        distance / metersPerPoint
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case metersPerPoint
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            metersPerPoint: try values.decodeIfPresent(
+                Double.self,
+                forKey: .metersPerPoint
+            ) ?? 1
+        )
+    }
+}
+
 public struct RoadSegment: Identifiable, Codable, Hashable, Sendable {
     public let id: UUID
     public var kind: RoadKind
-    public var level: RoadLevel
+    public private(set) var level: RoadLevel
+    public private(set) var structure: RoadStructureType
     public var points: [RoadPoint]
+    public var direction: RoadDirection
+    public var priority: RoadPriority
+    public var sourceRoadID: UUID
+    public var startNodeID: UUID?
+    public var endNodeID: UUID?
 
     public init(
         id: UUID = UUID(),
         kind: RoadKind,
         level: RoadLevel = .ground,
-        points: [RoadPoint]
+        structure: RoadStructureType? = nil,
+        points: [RoadPoint],
+        direction: RoadDirection = .bidirectional,
+        priority: RoadPriority? = nil,
+        sourceRoadID: UUID? = nil,
+        startNodeID: UUID? = nil,
+        endNodeID: UUID? = nil
     ) {
         self.id = id
         self.kind = kind
-        self.level = level
+        let normalizedStructure = structure ?? RoadStructureType(defaultFor: level)
+        self.level = normalizedStructure.renderLevel
+        self.structure = normalizedStructure
         self.points = points
+        self.direction = direction
+        self.priority = priority ?? kind.defaultPriority
+        self.sourceRoadID = sourceRoadID ?? id
+        self.startNodeID = startNodeID
+        self.endNodeID = endNodeID
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, kind, level, structure, points, direction, priority, sourceRoadID
+        case startNodeID, endNodeID
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        kind = try values.decode(RoadKind.self, forKey: .kind)
+        let decodedLevel = try values.decodeIfPresent(RoadLevel.self, forKey: .level) ?? .ground
+        structure = try values.decodeIfPresent(RoadStructureType.self, forKey: .structure)
+            ?? RoadStructureType(defaultFor: decodedLevel)
+        level = structure.renderLevel
+        points = try values.decode([RoadPoint].self, forKey: .points)
+        direction = try values.decodeIfPresent(RoadDirection.self, forKey: .direction)
+            ?? .bidirectional
+        priority = try values.decodeIfPresent(RoadPriority.self, forKey: .priority)
+            ?? kind.defaultPriority
+        sourceRoadID = try values.decodeIfPresent(UUID.self, forKey: .sourceRoadID) ?? id
+        startNodeID = try values.decodeIfPresent(UUID.self, forKey: .startNodeID)
+        endNodeID = try values.decodeIfPresent(UUID.self, forKey: .endNodeID)
+    }
+
+    public mutating func setStructure(_ structure: RoadStructureType) {
+        self.structure = structure
+        level = structure.renderLevel
     }
 }
 
@@ -136,7 +277,7 @@ public struct TerrainLayout: Codable, Hashable, Sendable {
 }
 
 public struct RoadProject: Identifiable, Codable, Hashable, Sendable {
-    public static let currentFormatVersion = 3
+    public static let currentFormatVersion = 10
 
     public let id: UUID
     public var formatVersion: Int
@@ -144,10 +285,16 @@ public struct RoadProject: Identifiable, Codable, Hashable, Sendable {
     public var createdAt: Date
     public var updatedAt: Date
     public var terrain: TerrainLayout
-    public var roads: [RoadSegment]
+    public var roadNetwork: RoadNetwork
+    public var interchanges: [RoadInterchange]
+    public var trafficRules: RoadTrafficRuleSet
+    public var structureReviews: [RoadStructureReviewRecord]
+    public var engineeringStructures: [RoadEngineeringStructure]
     public var theme: MapTheme
     public var showsContours: Bool
     public var showsGrid: Bool
+    public var layerVisibility: MapLayerVisibility
+    public var mapScale: MapScale
     public var groupID: UUID?
 
     public init(
@@ -157,9 +304,16 @@ public struct RoadProject: Identifiable, Codable, Hashable, Sendable {
         updatedAt: Date = .now,
         terrain: TerrainLayout = TerrainGenerator.generate(seed: 1),
         roads: [RoadSegment] = [],
+        roadNetwork: RoadNetwork? = nil,
+        interchanges: [RoadInterchange] = [],
+        trafficRules: RoadTrafficRuleSet = .init(),
+        structureReviews: [RoadStructureReviewRecord] = [],
+        engineeringStructures: [RoadEngineeringStructure] = [],
         theme: MapTheme = .planning,
         showsContours: Bool = true,
         showsGrid: Bool = true,
+        layerVisibility: MapLayerVisibility = .init(),
+        mapScale: MapScale = .standard,
         groupID: UUID? = nil
     ) {
         self.id = id
@@ -168,30 +322,118 @@ public struct RoadProject: Identifiable, Codable, Hashable, Sendable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.terrain = terrain
-        self.roads = roads
+        self.interchanges = interchanges
+        self.trafficRules = trafficRules
+        self.roadNetwork = roadNetwork ?? RoadNetwork.rebuilding(
+            from: roads,
+            interchanges: interchanges
+        ).network
+        self.structureReviews = structureReviews
+        self.engineeringStructures = engineeringStructures
         self.theme = theme
         self.showsContours = showsContours
         self.showsGrid = showsGrid
+        self.layerVisibility = layerVisibility
+        self.mapScale = mapScale
         self.groupID = groupID
+    }
+
+    public var roads: [RoadSegment] {
+        get { roadNetwork.roadSegments }
+        set {
+            roadNetwork = RoadNetwork.rebuilding(
+                from: newValue,
+                interchanges: interchanges
+            ).network
+        }
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, formatVersion, name, createdAt, updatedAt, terrain, roads
-        case theme, showsContours, showsGrid, groupID
+        case roadNetwork, interchanges, trafficRules
+        case structureReviews, engineeringStructures
+        case theme, showsContours, showsGrid
+        case layerVisibility, mapScale, groupID
     }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         id = try values.decode(UUID.self, forKey: .id)
         formatVersion = try values.decodeIfPresent(Int.self, forKey: .formatVersion) ?? 1
+        guard formatVersion <= Self.currentFormatVersion else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .formatVersion,
+                in: values,
+                debugDescription: "Unsupported project format version \(formatVersion)"
+            )
+        }
         name = try values.decode(String.self, forKey: .name)
         createdAt = try values.decode(Date.self, forKey: .createdAt)
         updatedAt = try values.decode(Date.self, forKey: .updatedAt)
         terrain = try values.decode(TerrainLayout.self, forKey: .terrain)
-        roads = try values.decodeIfPresent([RoadSegment].self, forKey: .roads) ?? []
+        interchanges = try values.decodeIfPresent(
+            [RoadInterchange].self,
+            forKey: .interchanges
+        ) ?? []
+        trafficRules = try values.decodeIfPresent(
+            RoadTrafficRuleSet.self,
+            forKey: .trafficRules
+        ) ?? .init()
+        if formatVersion >= 4 {
+            roadNetwork = try values.decode(RoadNetwork.self, forKey: .roadNetwork)
+        } else if let decodedNetwork = try values.decodeIfPresent(
+            RoadNetwork.self,
+            forKey: .roadNetwork
+        ) {
+            roadNetwork = decodedNetwork
+        } else {
+            let legacyRoads = try values.decodeIfPresent([RoadSegment].self, forKey: .roads) ?? []
+            roadNetwork = RoadNetwork.rebuilding(
+                from: legacyRoads,
+                interchanges: interchanges
+            ).network
+        }
+        structureReviews = try values.decodeIfPresent(
+            [RoadStructureReviewRecord].self,
+            forKey: .structureReviews
+        ) ?? []
+        engineeringStructures = try values.decodeIfPresent(
+            [RoadEngineeringStructure].self,
+            forKey: .engineeringStructures
+        ) ?? []
         theme = try values.decodeIfPresent(MapTheme.self, forKey: .theme) ?? .planning
         showsContours = try values.decodeIfPresent(Bool.self, forKey: .showsContours) ?? true
         showsGrid = try values.decodeIfPresent(Bool.self, forKey: .showsGrid) ?? true
+        layerVisibility = try values.decodeIfPresent(
+            MapLayerVisibility.self,
+            forKey: .layerVisibility
+        ) ?? .init()
+        mapScale = try values.decodeIfPresent(
+            MapScale.self,
+            forKey: .mapScale
+        ) ?? .standard
         groupID = try values.decodeIfPresent(UUID.self, forKey: .groupID)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(id, forKey: .id)
+        try values.encode(formatVersion, forKey: .formatVersion)
+        try values.encode(name, forKey: .name)
+        try values.encode(createdAt, forKey: .createdAt)
+        try values.encode(updatedAt, forKey: .updatedAt)
+        try values.encode(terrain, forKey: .terrain)
+        try values.encode(roads, forKey: .roads)
+        try values.encode(roadNetwork, forKey: .roadNetwork)
+        try values.encode(interchanges, forKey: .interchanges)
+        try values.encode(trafficRules, forKey: .trafficRules)
+        try values.encode(structureReviews, forKey: .structureReviews)
+        try values.encode(engineeringStructures, forKey: .engineeringStructures)
+        try values.encode(theme, forKey: .theme)
+        try values.encode(showsContours, forKey: .showsContours)
+        try values.encode(showsGrid, forKey: .showsGrid)
+        try values.encode(layerVisibility, forKey: .layerVisibility)
+        try values.encode(mapScale, forKey: .mapScale)
+        try values.encodeIfPresent(groupID, forKey: .groupID)
     }
 }

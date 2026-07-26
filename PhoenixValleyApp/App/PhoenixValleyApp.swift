@@ -22,8 +22,7 @@ struct PhoenixValleyApp: App {
             document.createNewMap()
         }
         if let kind = request.roadKind {
-            document.selectedKind = kind
-            document.isErasing = false
+            document.activateDrawing(kind: kind)
         }
     }
 }

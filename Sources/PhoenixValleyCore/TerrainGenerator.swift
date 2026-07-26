@@ -1,5 +1,82 @@
 import Foundation
 
+public struct TerrainGenerationRequest: Hashable, Sendable {
+    public var seed: UInt64
+    public var vertexCount: Int
+    public var gridWidth: Int
+    public var gridHeight: Int
+    public var generationVersion: Int
+
+    public init(
+        seed: UInt64,
+        vertexCount: Int = 96,
+        gridWidth: Int = 129,
+        gridHeight: Int = 97
+    ) {
+        self.seed = seed
+        self.vertexCount = max(72, vertexCount)
+        self.gridWidth = max(17, gridWidth)
+        self.gridHeight = max(13, gridHeight)
+        generationVersion = TerrainLayout.currentGenerationVersion
+    }
+}
+
+public enum TerrainGenerationPhase: String, Hashable, Sendable {
+    case shoreline
+    case landforms
+    case elevationGrid
+    case finished
+}
+
+public struct TerrainGenerationProgress: Hashable, Sendable {
+    public var phase: TerrainGenerationPhase
+    public var fractionCompleted: Double
+
+    public init(phase: TerrainGenerationPhase, fractionCompleted: Double) {
+        self.phase = phase
+        self.fractionCompleted = min(1, max(0, fractionCompleted))
+    }
+}
+
+public actor TerrainGenerationCache {
+    public static let shared = TerrainGenerationCache()
+
+    private let capacity: Int
+    private var entries: [TerrainGenerationRequest: TerrainLayout] = [:]
+    private var recency: [TerrainGenerationRequest] = []
+
+    public init(capacity: Int = 8) {
+        self.capacity = max(1, capacity)
+    }
+
+    public func value(for request: TerrainGenerationRequest) -> TerrainLayout? {
+        guard let terrain = entries[request] else { return nil }
+        recency.removeAll { $0 == request }
+        recency.append(request)
+        return terrain
+    }
+
+    public func insert(_ terrain: TerrainLayout, for request: TerrainGenerationRequest) {
+        entries[request] = terrain
+        recency.removeAll { $0 == request }
+        recency.append(request)
+
+        while recency.count > capacity {
+            let oldest = recency.removeFirst()
+            entries.removeValue(forKey: oldest)
+        }
+    }
+
+    public func removeAll() {
+        entries.removeAll()
+        recency.removeAll()
+    }
+
+    public var count: Int {
+        entries.count
+    }
+}
+
 public enum TerrainGenerator {
     private struct Ridge {
         let points: [RoadPoint]
@@ -19,6 +96,53 @@ public enum TerrainGenerator {
         gridWidth: Int = 129,
         gridHeight: Int = 97
     ) -> TerrainLayout {
+        let request = TerrainGenerationRequest(
+            seed: seed,
+            vertexCount: vertexCount,
+            gridWidth: gridWidth,
+            gridHeight: gridHeight
+        )
+        do {
+            return try generate(
+                request: request,
+                progress: nil,
+                cancellationCheck: nil
+            )
+        } catch {
+            preconditionFailure("Synchronous terrain generation unexpectedly failed: \(error)")
+        }
+    }
+
+    public static func generate(
+        request: TerrainGenerationRequest,
+        progress: @escaping @Sendable (TerrainGenerationProgress) -> Void
+    ) async throws -> TerrainLayout {
+        let worker = Task.detached(priority: .userInitiated) {
+            try generate(
+                request: request,
+                progress: progress,
+                cancellationCheck: {
+                    try Task.checkCancellation()
+                }
+            )
+        }
+
+        return try await withTaskCancellationHandler {
+            try await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
+    }
+
+    private static func generate(
+        request: TerrainGenerationRequest,
+        progress: (@Sendable (TerrainGenerationProgress) -> Void)?,
+        cancellationCheck: (@Sendable () throws -> Void)?
+    ) throws -> TerrainLayout {
+        try cancellationCheck?()
+        progress?(TerrainGenerationProgress(phase: .shoreline, fractionCompleted: 0))
+
+        let seed = request.seed
         var generator = SeededGenerator(seed: seed)
         let center = RoadPoint(
             x: 735 + generator.nextUnit() * 130,
@@ -32,9 +156,11 @@ public enum TerrainGenerator {
             horizontalBase: horizontalBase,
             verticalBase: verticalBase,
             rotation: rotation,
-            vertexCount: max(72, vertexCount),
+            vertexCount: request.vertexCount,
             generator: &generator
         )
+        try cancellationCheck?()
+        progress?(TerrainGenerationProgress(phase: .landforms, fractionCompleted: 0.1))
 
         let primaryDirection = generator.nextUnit() * Double.pi
         var ridges = [makeRidge(
@@ -104,12 +230,16 @@ public enum TerrainGenerator {
             )
         }
 
-        let width = max(17, gridWidth)
-        let height = max(13, gridHeight)
+        try cancellationCheck?()
+        progress?(TerrainGenerationProgress(phase: .elevationGrid, fractionCompleted: 0.2))
+
+        let width = request.gridWidth
+        let height = request.gridHeight
         var elevations: [UInt16] = []
         elevations.reserveCapacity(width * height)
 
         for row in 0..<height {
+            try cancellationCheck?()
             for column in 0..<width {
                 let point = RoadPoint(
                     x: Double(column) / Double(width - 1) * 1600,
@@ -166,6 +296,16 @@ public enum TerrainGenerator {
                 elevation = min(elevation, coastalCeiling)
                 elevation = min(0.96, max(0.205, elevation))
                 elevations.append(UInt16((elevation * Double(UInt16.max)).rounded()))
+            }
+
+            if row.isMultiple(of: 2) || row == height - 1 {
+                let fraction = 0.2 + 0.8 * Double(row + 1) / Double(height)
+                progress?(
+                    TerrainGenerationProgress(
+                        phase: row == height - 1 ? .finished : .elevationGrid,
+                        fractionCompleted: fraction
+                    )
+                )
             }
         }
 
