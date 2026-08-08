@@ -14,7 +14,6 @@ struct RoadEditorView: View {
             RoadCanvasWorkspace(document: document)
         }
         .navigationSplitViewStyle(.balanced)
-        .preferredColorScheme(.light)
         .alert(
             document.alertTitle,
             isPresented: Binding(
@@ -1421,7 +1420,9 @@ private struct ThemeOptionButton: View {
                     .overlay {
                         RoundedRectangle(cornerRadius: 13, style: .continuous)
                             .stroke(
-                                isSelected ? Color.accentColor : .black.opacity(0.1),
+                                isSelected
+                                    ? Color.accentColor
+                                    : Color.primary.opacity(0.12),
                                 lineWidth: isSelected ? 3 : 1
                             )
                     }
@@ -1453,7 +1454,7 @@ private struct MapContentThumbnail: View {
         .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .stroke(.black.opacity(0.09))
+                    .stroke(.primary.opacity(0.12))
             }
             .accessibilityHidden(true)
     }
@@ -1736,7 +1737,7 @@ private struct PaletteGlassSurface: ViewModifier {
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .stroke(.black.opacity(0.1))
+                        .stroke(.primary.opacity(0.12))
                 }
         }
     }

@@ -289,6 +289,13 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         accessibilityIdentifier = "road-canvas"
         accessibilityTraits = [.allowsDirectInteraction]
 
+        if #available(iOS 17.0, *) {
+            registerForTraitChanges(
+                [UITraitUserInterfaceStyle.self],
+                action: #selector(userInterfaceStyleDidChange)
+            )
+        }
+
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         pan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
         pan.minimumNumberOfTouches = allowsFingerDrawing ? 2 : 1
@@ -303,6 +310,10 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         pinch.cancelsTouchesInView = true
         pinch.delegate = self
         addGestureRecognizer(pinch)
+    }
+
+    @objc private func userInterfaceStyleDidChange() {
+        setNeedsDisplay()
     }
 
     @available(*, unavailable)

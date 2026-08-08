@@ -320,7 +320,7 @@ private struct InterchangeInspectorSurface: ViewModifier {
                         cornerRadius: 18,
                         style: .continuous
                     )
-                    .stroke(.black.opacity(0.1))
+                    .stroke(.primary.opacity(0.12))
                 }
         }
     }

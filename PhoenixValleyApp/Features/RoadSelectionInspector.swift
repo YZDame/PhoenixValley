@@ -159,7 +159,7 @@ private struct SelectionInspectorSurface: ViewModifier {
                         cornerRadius: 16,
                         style: .continuous
                     )
-                    .stroke(.black.opacity(0.1))
+                    .stroke(.primary.opacity(0.12))
                 }
         }
     }
