@@ -162,12 +162,20 @@ public enum MapExporter {
                 context.saveGState()
                 context.addPath(shoreline)
                 context.clip()
-                drawElevation(project.terrain, palette: palette, in: context)
+                drawElevation(
+                    project.terrain,
+                    showsHydrology: project.layerVisibility.showsHydrology,
+                    palette: palette,
+                    in: context
+                )
                 if project.showsGrid {
                     drawGrid(color: palette.grid, in: context)
                 }
                 if project.showsContours {
                     drawContours(project.terrain, color: palette.contour, in: context)
+                }
+                if project.layerVisibility.showsWatersheds {
+                    drawWatersheds(project.terrain.hydrology, color: palette.watershed, in: context)
                 }
                 context.restoreGState()
 
@@ -178,12 +186,20 @@ public enum MapExporter {
             } else {
                 context.saveGState()
                 context.clip(to: fullCanvas)
-                drawElevation(project.terrain, palette: palette, in: context)
+                drawElevation(
+                    project.terrain,
+                    showsHydrology: project.layerVisibility.showsHydrology,
+                    palette: palette,
+                    in: context
+                )
                 if project.showsGrid {
                     drawGrid(color: palette.grid, in: context)
                 }
                 if project.showsContours {
                     drawContours(project.terrain, color: palette.contour, in: context)
+                }
+                if project.layerVisibility.showsWatersheds {
+                    drawWatersheds(project.terrain.hydrology, color: palette.watershed, in: context)
                 }
                 context.restoreGState()
             }
@@ -217,10 +233,15 @@ public enum MapExporter {
 
     private static func drawElevation(
         _ terrain: TerrainLayout,
+        showsHydrology: Bool,
         palette: ExportPalette,
         in context: CGContext
     ) {
-        guard let image = elevationImage(terrain, palette: palette) else { return }
+        guard let image = elevationImage(
+            terrain,
+            showsHydrology: showsHydrology,
+            palette: palette
+        ) else { return }
         context.saveGState()
         defer { context.restoreGState() }
         context.interpolationQuality = .high
@@ -242,6 +263,7 @@ public enum MapExporter {
 
     private static func elevationImage(
         _ terrain: TerrainLayout,
+        showsHydrology: Bool,
         palette: ExportPalette
     ) -> CGImage? {
         guard terrain.hasElevationData else { return nil }
@@ -254,9 +276,19 @@ public enum MapExporter {
                 let elevation = Double(
                     terrain.elevations[row * terrain.gridWidth + column]
                 ) / Double(UInt16.max)
-                let color = elevation <= terrain.waterLevel
-                    ? palette.water
-                    : palette.landColor(for: elevation)
+                let surface = terrain.hydrology.surface(column: column, row: row)
+                let color: ExportColor
+                if showsHydrology, terrain.hydrology.hasData {
+                    color = switch surface {
+                    case .river, .lake, .ocean: palette.water
+                    case .wetland: palette.wetland
+                    case .land: palette.landColor(for: elevation)
+                    }
+                } else if !terrain.hydrology.hasData, elevation <= terrain.waterLevel {
+                    color = palette.water
+                } else {
+                    color = palette.landColor(for: elevation)
+                }
                 let index = (row * terrain.gridWidth + column) * 4
                 pixels[index] = color.redByte
                 pixels[index + 1] = color.greenByte
@@ -357,6 +389,43 @@ public enum MapExporter {
             }
             context.strokePath()
         }
+    }
+
+    private static func drawWatersheds(
+        _ hydrology: HydrologyLayout,
+        color: ExportColor,
+        in context: CGContext
+    ) {
+        guard hydrology.hasData else { return }
+        let cellWidth = Double(canvasWidth) / Double(hydrology.gridWidth - 1)
+        let cellHeight = Double(canvasHeight) / Double(hydrology.gridHeight - 1)
+        color.setStroke(in: context)
+        context.setLineWidth(0.75)
+        context.setLineCap(.butt)
+        context.setLineJoin(.miter)
+        context.beginPath()
+        for row in 0..<hydrology.gridHeight {
+            for column in 0..<hydrology.gridWidth {
+                guard let current = hydrology.watershedID(column: column, row: row) else {
+                    continue
+                }
+                if column + 1 < hydrology.gridWidth,
+                   let right = hydrology.watershedID(column: column + 1, row: row),
+                   right != current {
+                    let x = (Double(column) + 0.5) * cellWidth
+                    context.move(to: CGPoint(x: x, y: Double(row) * cellHeight))
+                    context.addLine(to: CGPoint(x: x, y: Double(row + 1) * cellHeight))
+                }
+                if row + 1 < hydrology.gridHeight,
+                   let bottom = hydrology.watershedID(column: column, row: row + 1),
+                   bottom != current {
+                    let y = (Double(row) + 0.5) * cellHeight
+                    context.move(to: CGPoint(x: Double(column) * cellWidth, y: y))
+                    context.addLine(to: CGPoint(x: Double(column + 1) * cellWidth, y: y))
+                }
+            }
+        }
+        context.strokePath()
     }
 
     private static func drawRoads(
@@ -655,12 +724,20 @@ public enum MapExporter {
             body.append(#"<g filter="url(#terrain-smooth)">"#)
             appendSVGElevation(
                 project.terrain,
+                showsHydrology: project.layerVisibility.showsHydrology,
                 palette: palette,
                 to: &body
             )
             body.append("</g>")
             if project.showsGrid {
                 appendSVGGrid(color: palette.grid, to: &body)
+            }
+            if project.layerVisibility.showsWatersheds {
+                appendSVGWatersheds(
+                    project.terrain.hydrology,
+                    color: palette.watershed,
+                    to: &body
+                )
             }
             body.append("</g>")
             body.append(
@@ -679,12 +756,20 @@ public enum MapExporter {
             body.append(#"<g filter="url(#terrain-smooth)">"#)
             appendSVGElevation(
                 project.terrain,
+                showsHydrology: project.layerVisibility.showsHydrology,
                 palette: palette,
                 to: &body
             )
             body.append("</g>")
             if project.showsGrid {
                 appendSVGGrid(color: palette.grid, to: &body)
+            }
+            if project.layerVisibility.showsWatersheds {
+                appendSVGWatersheds(
+                    project.terrain.hydrology,
+                    color: palette.watershed,
+                    to: &body
+                )
             }
         }
 
@@ -718,6 +803,7 @@ public enum MapExporter {
 
     private static func appendSVGElevation(
         _ terrain: TerrainLayout,
+        showsHydrology: Bool,
         palette: ExportPalette,
         to body: inout [String]
     ) {
@@ -736,9 +822,19 @@ public enum MapExporter {
                     y: (Double(row) + 0.5) * cellHeight
                 )
                 let elevation = terrain.normalizedElevation(at: point)
-                let color = elevation <= terrain.waterLevel
-                    ? palette.water
-                    : palette.landColor(for: elevation)
+                let surface = terrain.hydrology.surface(at: point)
+                let color: ExportColor
+                if showsHydrology, terrain.hydrology.hasData {
+                    color = switch surface {
+                    case .river, .lake, .ocean: palette.water
+                    case .wetland: palette.wetland
+                    case .land: palette.landColor(for: elevation)
+                    }
+                } else if !terrain.hydrology.hasData, elevation <= terrain.waterLevel {
+                    color = palette.water
+                } else {
+                    color = palette.landColor(for: elevation)
+                }
                 body.append(
                     #"<rect x="\#(svgNumber(Double(column) * cellWidth))" y="\#(svgNumber(Double(row) * cellHeight))" width="\#(svgNumber(cellWidth + 0.5))" height="\#(svgNumber(cellHeight + 0.5))" fill="\#(color.hex)"\#(color.opacityAttribute("fill"))/>"#
                 )
@@ -759,6 +855,42 @@ public enum MapExporter {
         }
         body.append(
             #"<path d="\#(path)" fill="none" stroke="\#(color.hex)" stroke-width="0.8"\#(color.opacityAttribute("stroke"))/>"#
+        )
+    }
+
+    private static func appendSVGWatersheds(
+        _ hydrology: HydrologyLayout,
+        color: ExportColor,
+        to body: inout [String]
+    ) {
+        guard hydrology.hasData else { return }
+        let cellWidth = Double(canvasWidth) / Double(hydrology.gridWidth - 1)
+        let cellHeight = Double(canvasHeight) / Double(hydrology.gridHeight - 1)
+        var path = ""
+        for row in 0..<hydrology.gridHeight {
+            for column in 0..<hydrology.gridWidth {
+                guard let current = hydrology.watershedID(column: column, row: row) else {
+                    continue
+                }
+                if column + 1 < hydrology.gridWidth,
+                   let right = hydrology.watershedID(column: column + 1, row: row),
+                   right != current {
+                    let x = (Double(column) + 0.5) * cellWidth
+                    path += "M\(svgNumber(x)) \(svgNumber(Double(row) * cellHeight))"
+                        + "V\(svgNumber(Double(row + 1) * cellHeight))"
+                }
+                if row + 1 < hydrology.gridHeight,
+                   let bottom = hydrology.watershedID(column: column, row: row + 1),
+                   bottom != current {
+                    let y = (Double(row) + 0.5) * cellHeight
+                    path += "M\(svgNumber(Double(column) * cellWidth)) \(svgNumber(y))"
+                        + "H\(svgNumber(Double(column + 1) * cellWidth))"
+                }
+            }
+        }
+        guard !path.isEmpty else { return }
+        body.append(
+            #"<path id="watershed-boundaries" d="\#(path)" fill="none" stroke="\#(color.hex)" stroke-width="0.75"\#(color.opacityAttribute("stroke"))/>"#
         )
     }
 
@@ -1016,6 +1148,42 @@ public enum MapExporter {
             ])
         }
 
+        let hydrology = project.terrain.hydrology
+        if project.layerVisibility.showsTerrain,
+           project.layerVisibility.showsHydrology,
+           hydrology.hasData {
+            features.append([
+                "type": "Feature",
+                "id": "hydrology-summary",
+                "properties": [
+                    "featureType": "hydrologySummary",
+                    "riverCellCount": hydrology.cellCount(for: .river),
+                    "lakeCellCount": hydrology.cellCount(for: .lake),
+                    "wetlandCellCount": hydrology.cellCount(for: .wetland),
+                    "watershedCount": hydrology.outlets.count,
+                ],
+                "geometry": NSNull(),
+            ])
+            for outlet in hydrology.outlets {
+                features.append([
+                    "type": "Feature",
+                    "id": "watershed-outlet-\(outlet.id)",
+                    "properties": [
+                        "featureType": "watershedOutlet",
+                        "watershedID": Int(outlet.id),
+                        "drainageCellCount": outlet.drainageCellCount,
+                    ],
+                    "geometry": [
+                        "type": "Point",
+                        "coordinates": [
+                            outlet.point.x * metersPerPoint,
+                            outlet.point.y * metersPerPoint,
+                        ],
+                    ],
+                ])
+            }
+        }
+
         for road in project.roads
         where project.layerVisibility.isVisible(road.kind) {
             features.append([
@@ -1184,6 +1352,19 @@ private struct ExportPalette: Sendable {
     let street: ExportColor
     let railway: ExportColor
     let bridge = ExportColor(red: 0.2, green: 0.72, blue: 0.83, alpha: 0.82)
+
+    var wetland: ExportColor {
+        plain.mixed(with: water, amount: 0.44).mixed(with: lowland, amount: 0.2)
+    }
+
+    var watershed: ExportColor {
+        ExportColor(
+            red: contour.red,
+            green: contour.green,
+            blue: contour.blue,
+            alpha: min(0.5, max(0.32, contour.alpha * 1.7))
+        )
+    }
 
     init(theme: MapTheme) {
         switch theme {

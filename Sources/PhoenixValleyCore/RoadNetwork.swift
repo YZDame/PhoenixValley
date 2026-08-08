@@ -75,13 +75,19 @@ public enum MapTheme: String, Codable, CaseIterable, Identifiable, Sendable {
 
 public struct MapLayerVisibility: Codable, Hashable, Sendable {
     public var showsTerrain: Bool
+    public var showsHydrology: Bool
+    public var showsWatersheds: Bool
     public var hiddenRoadKinds: Set<RoadKind>
 
     public init(
         showsTerrain: Bool = true,
+        showsHydrology: Bool = true,
+        showsWatersheds: Bool = false,
         hiddenRoadKinds: Set<RoadKind> = []
     ) {
         self.showsTerrain = showsTerrain
+        self.showsHydrology = showsHydrology
+        self.showsWatersheds = showsWatersheds
         self.hiddenRoadKinds = hiddenRoadKinds
     }
 
@@ -95,6 +101,23 @@ public struct MapLayerVisibility: Codable, Hashable, Sendable {
         } else {
             hiddenRoadKinds.insert(kind)
         }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case showsTerrain, showsHydrology, showsWatersheds, hiddenRoadKinds
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            showsTerrain: try values.decodeIfPresent(Bool.self, forKey: .showsTerrain) ?? true,
+            showsHydrology: try values.decodeIfPresent(Bool.self, forKey: .showsHydrology) ?? true,
+            showsWatersheds: try values.decodeIfPresent(Bool.self, forKey: .showsWatersheds) ?? false,
+            hiddenRoadKinds: try values.decodeIfPresent(
+                Set<RoadKind>.self,
+                forKey: .hiddenRoadKinds
+            ) ?? []
+        )
     }
 }
 
@@ -251,7 +274,7 @@ public enum TerrainScenario: String, CaseIterable, Codable, Hashable, Identifiab
 }
 
 public struct TerrainLayout: Codable, Hashable, Sendable {
-    public static let currentGenerationVersion = 6
+    public static let currentGenerationVersion = 7
 
     public var seed: UInt64
     public var shoreline: [RoadPoint]
@@ -261,6 +284,7 @@ public struct TerrainLayout: Codable, Hashable, Sendable {
     public var elevations: [UInt16]
     public var waterLevel: Double
     public var scenario: TerrainScenario
+    public var hydrology: HydrologyLayout
 
     public init(
         seed: UInt64,
@@ -270,7 +294,8 @@ public struct TerrainLayout: Codable, Hashable, Sendable {
         gridHeight: Int = 0,
         elevations: [UInt16] = [],
         waterLevel: Double = 0.2,
-        scenario: TerrainScenario = .island
+        scenario: TerrainScenario = .island,
+        hydrology: HydrologyLayout = .init()
     ) {
         self.seed = seed
         self.shoreline = shoreline
@@ -280,6 +305,7 @@ public struct TerrainLayout: Codable, Hashable, Sendable {
         self.elevations = elevations
         self.waterLevel = waterLevel
         self.scenario = scenario
+        self.hydrology = hydrology
     }
 
     public var hasElevationData: Bool {
@@ -309,7 +335,7 @@ public struct TerrainLayout: Codable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case seed, shoreline, generationVersion, gridWidth, gridHeight, elevations, waterLevel
-        case scenario
+        case scenario, hydrology
     }
 
     public init(from decoder: Decoder) throws {
@@ -322,6 +348,7 @@ public struct TerrainLayout: Codable, Hashable, Sendable {
         elevations = try values.decodeIfPresent([UInt16].self, forKey: .elevations) ?? []
         waterLevel = try values.decodeIfPresent(Double.self, forKey: .waterLevel) ?? 0.2
         scenario = try values.decodeIfPresent(TerrainScenario.self, forKey: .scenario) ?? .island
+        hydrology = try values.decodeIfPresent(HydrologyLayout.self, forKey: .hydrology) ?? .init()
     }
 }
 

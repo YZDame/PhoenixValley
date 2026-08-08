@@ -97,6 +97,8 @@ struct RoadCanvasRepresentable: UIViewRepresentable {
         } ?? []
         view.theme = project.theme
         view.showsTerrain = project.layerVisibility.showsTerrain
+        view.showsHydrology = project.layerVisibility.showsHydrology
+        view.showsWatersheds = project.layerVisibility.showsWatersheds
         view.showsContours = project.showsContours
         view.showsGrid = project.showsGrid
         view.selectedKind = selectedKind
@@ -238,6 +240,12 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         didSet { if oldValue != theme { terrainImage = nil } }
     }
     var showsTerrain = true
+    var showsHydrology = true {
+        didSet { if oldValue != showsHydrology { terrainImage = nil } }
+    }
+    var showsWatersheds = false {
+        didSet { if oldValue != showsWatersheds { terrainImage = nil } }
+    }
     var showsContours = true {
         didSet { if oldValue != showsContours { terrainImage = nil } }
     }
@@ -1370,6 +1378,9 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
             if showsContours {
                 drawContours(in: context, color: palette.contour)
             }
+            if showsWatersheds {
+                drawWatershedBoundaries(in: context, color: palette.watershed)
+            }
             context.restoreGState()
             return
         }
@@ -1402,6 +1413,9 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         if showsContours {
             drawContours(in: context, color: palette.contour)
         }
+        if showsWatersheds {
+            drawWatershedBoundaries(in: context, color: palette.watershed)
+        }
         context.restoreGState()
 
         context.setStrokeColor(palette.shoreline.cgColor)
@@ -1423,9 +1437,19 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
                 for column in 0..<terrain.gridWidth {
                     let value = Double(terrain.elevations[row * terrain.gridWidth + column])
                         / Double(UInt16.max)
-                    let color = value <= terrain.waterLevel
-                        ? palette.water
-                        : palette.color(for: value)
+                    let surface = terrain.hydrology.surface(column: column, row: row)
+                    let color: UIColor
+                    if showsHydrology, terrain.hydrology.hasData {
+                        color = switch surface {
+                        case .river, .lake, .ocean: palette.water
+                        case .wetland: palette.wetland
+                        case .land: palette.color(for: value)
+                        }
+                    } else if !terrain.hydrology.hasData, value <= terrain.waterLevel {
+                        color = palette.water
+                    } else {
+                        color = palette.color(for: value)
+                    }
                     renderer.cgContext.setFillColor(color.cgColor)
                     renderer.cgContext.fill(CGRect(x: column, y: row, width: 1, height: 1))
                 }
@@ -1450,6 +1474,43 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
             context.addLine(to: CGPoint(x: 1600, y: y))
         }
         context.strokePath()
+    }
+
+    private func drawWatershedBoundaries(in context: CGContext, color: UIColor) {
+        let hydrology = terrain.hydrology
+        guard hydrology.hasData else { return }
+        let cellWidth = MapScale.canvasWidth / Double(hydrology.gridWidth - 1)
+        let cellHeight = MapScale.canvasHeight / Double(hydrology.gridHeight - 1)
+
+        context.saveGState()
+        context.setStrokeColor(color.cgColor)
+        context.setLineWidth(0.75)
+        context.setLineCap(.butt)
+        context.setLineJoin(.miter)
+        context.beginPath()
+        for row in 0..<hydrology.gridHeight {
+            for column in 0..<hydrology.gridWidth {
+                guard let current = hydrology.watershedID(column: column, row: row) else {
+                    continue
+                }
+                if column + 1 < hydrology.gridWidth,
+                   let right = hydrology.watershedID(column: column + 1, row: row),
+                   right != current {
+                    let x = (Double(column) + 0.5) * cellWidth
+                    context.move(to: CGPoint(x: x, y: Double(row) * cellHeight))
+                    context.addLine(to: CGPoint(x: x, y: Double(row + 1) * cellHeight))
+                }
+                if row + 1 < hydrology.gridHeight,
+                   let bottom = hydrology.watershedID(column: column, row: row + 1),
+                   bottom != current {
+                    let y = (Double(row) + 0.5) * cellHeight
+                    context.move(to: CGPoint(x: Double(column) * cellWidth, y: y))
+                    context.addLine(to: CGPoint(x: Double(column + 1) * cellWidth, y: y))
+                }
+            }
+        }
+        context.strokePath()
+        context.restoreGState()
     }
 
     private func drawContours(in context: CGContext, color: UIColor) {
@@ -2251,6 +2312,14 @@ private struct TerrainPalette {
     let grid: UIColor
     let contour: UIColor
     let shoreline: UIColor
+
+    var wetland: UIColor {
+        plain.mixed(with: water, amount: 0.44).mixed(with: lowland, amount: 0.2)
+    }
+
+    var watershed: UIColor {
+        contour.withAlphaComponent(0.48)
+    }
 
     func color(for elevation: Double) -> UIColor {
         switch elevation {

@@ -334,6 +334,7 @@ private extension TerrainGenerationPhase {
         case .shoreline: "正在生成海岸线"
         case .landforms: "正在布置山脉与谷地"
         case .elevationGrid: "正在计算高程"
+        case .hydrology: "正在分析河流和流域"
         case .finished: "地形生成完成"
         }
     }
@@ -1120,6 +1121,12 @@ private struct MapAppearancePopover: View {
 
                 VStack(spacing: 14) {
                     Toggle("地形", systemImage: "mountain.2", isOn: terrainSelection)
+                    Toggle("水系", systemImage: "water.waves", isOn: hydrologySelection)
+                        .disabled(!terrainSelection.wrappedValue)
+                        .accessibilityIdentifier("hydrology-layer-toggle")
+                    Toggle("流域边界", systemImage: "point.3.connected.trianglepath.dotted", isOn: watershedSelection)
+                        .disabled(!terrainSelection.wrappedValue)
+                        .accessibilityIdentifier("watershed-layer-toggle")
                     Toggle("等高线", systemImage: "lines.measurement.horizontal", isOn: contoursSelection)
                     Toggle("规划网格", systemImage: "grid", isOn: gridSelection)
                 }
@@ -1316,6 +1323,20 @@ private struct MapAppearancePopover: View {
         Binding(
             get: { document.project.showsContours },
             set: { document.setShowsContours($0) }
+        )
+    }
+
+    private var hydrologySelection: Binding<Bool> {
+        Binding(
+            get: { document.project.layerVisibility.showsHydrology },
+            set: { document.setShowsHydrology($0) }
+        )
+    }
+
+    private var watershedSelection: Binding<Bool> {
+        Binding(
+            get: { document.project.layerVisibility.showsWatersheds },
+            set: { document.setShowsWatersheds($0) }
         )
     }
 

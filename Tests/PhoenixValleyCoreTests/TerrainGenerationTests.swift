@@ -35,6 +35,7 @@ import Testing
     let updates = recorder.updates
     #expect(updates.first?.phase == .shoreline)
     #expect(updates.first?.fractionCompleted == 0)
+    #expect(updates.contains { $0.phase == .hydrology })
     #expect(updates.last?.phase == .finished)
     #expect(updates.last?.fractionCompleted == 1)
     #expect(

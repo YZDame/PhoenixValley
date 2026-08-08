@@ -6,11 +6,17 @@ import Testing
     let visibility = MapLayerVisibility()
 
     #expect(visibility.showsTerrain)
+    #expect(visibility.showsHydrology)
+    #expect(!visibility.showsWatersheds)
     #expect(RoadKind.allCases.allSatisfy { visibility.isVisible($0) })
 }
 
 @Test func mapLayerVisibilityRoundTripsWithProject() throws {
-    var visibility = MapLayerVisibility(showsTerrain: false)
+    var visibility = MapLayerVisibility(
+        showsTerrain: false,
+        showsHydrology: false,
+        showsWatersheds: true
+    )
     visibility.setVisible(false, for: .motorway)
     visibility.setVisible(false, for: .railway)
     let project = RoadProject(
@@ -24,6 +30,8 @@ import Testing
     )
 
     #expect(!decoded.layerVisibility.showsTerrain)
+    #expect(!decoded.layerVisibility.showsHydrology)
+    #expect(decoded.layerVisibility.showsWatersheds)
     #expect(!decoded.layerVisibility.isVisible(.motorway))
     #expect(decoded.layerVisibility.isVisible(.arterial))
     #expect(!decoded.layerVisibility.isVisible(.railway))
@@ -44,6 +52,8 @@ import Testing
     )
 
     #expect(decoded.layerVisibility.showsTerrain)
+    #expect(decoded.layerVisibility.showsHydrology)
+    #expect(!decoded.layerVisibility.showsWatersheds)
     #expect(RoadKind.allCases.allSatisfy {
         decoded.layerVisibility.isVisible($0)
     })

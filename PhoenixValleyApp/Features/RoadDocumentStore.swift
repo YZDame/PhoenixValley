@@ -1249,6 +1249,20 @@ final class RoadDocumentStore {
         persist()
     }
 
+    func setShowsHydrology(_ value: Bool) {
+        guard project.layerVisibility.showsHydrology != value else { return }
+        project.layerVisibility.showsHydrology = value
+        project.updatedAt = .now
+        persist()
+    }
+
+    func setShowsWatersheds(_ value: Bool) {
+        guard project.layerVisibility.showsWatersheds != value else { return }
+        project.layerVisibility.showsWatersheds = value
+        project.updatedAt = .now
+        persist()
+    }
+
     func setRoadKind(_ kind: RoadKind, isVisible: Bool) {
         guard project.layerVisibility.isVisible(kind) != isVisible else { return }
         project.layerVisibility.setVisible(isVisible, for: kind)

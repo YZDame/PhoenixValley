@@ -100,6 +100,34 @@ import Testing
     #expect(featureTypes.filter { $0 == "tunnelPortal" }.count == 2)
 }
 
+@Test func exportsCarryHydrologyAndWatershedSemantics() throws {
+    var project = RoadProject(
+        name: "Hydrology",
+        terrain: TerrainGenerator.generate(
+            seed: 20260808,
+            gridWidth: 65,
+            gridHeight: 49,
+            scenario: .riverAndLakes
+        )
+    )
+    project.layerVisibility.showsWatersheds = true
+
+    let svgData = try MapExporter.data(for: project, format: .svg)
+    let svg = try #require(String(data: svgData, encoding: .utf8))
+    #expect(svg.contains(#"id="watershed-boundaries""#))
+
+    let data = try MapExporter.data(for: project, format: .geoJSON)
+    let object = try #require(
+        JSONSerialization.jsonObject(with: data) as? [String: Any]
+    )
+    let features = try #require(object["features"] as? [[String: Any]])
+    let featureTypes = features.compactMap {
+        ($0["properties"] as? [String: Any])?["featureType"] as? String
+    }
+    #expect(featureTypes.contains("hydrologySummary"))
+    #expect(featureTypes.filter { $0 == "watershedOutlet" }.count == 4)
+}
+
 private func exportTestProject() -> RoadProject {
     let terrain = TerrainGenerator.generate(
         seed: 42,

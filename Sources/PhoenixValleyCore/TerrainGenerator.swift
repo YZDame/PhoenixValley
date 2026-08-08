@@ -28,6 +28,7 @@ public enum TerrainGenerationPhase: String, Hashable, Sendable {
     case shoreline
     case landforms
     case elevationGrid
+    case hydrology
     case finished
 }
 
@@ -397,18 +398,21 @@ public enum TerrainGenerator {
             }
 
             if row.isMultiple(of: 2) || row == height - 1 {
-                let fraction = 0.2 + 0.8 * Double(row + 1) / Double(height)
+                let fraction = 0.2 + 0.7 * Double(row + 1) / Double(height)
                 progress?(
                     TerrainGenerationProgress(
-                        phase: row == height - 1 ? .finished : .elevationGrid,
+                        phase: .elevationGrid,
                         fractionCompleted: fraction
                     )
                 )
             }
         }
 
+        try cancellationCheck?()
+        progress?(TerrainGenerationProgress(phase: .hydrology, fractionCompleted: 0.9))
+        let hydrology: HydrologyLayout
         if request.scenario == .riverAndLakes {
-            carveDrainageNetwork(
+            hydrology = carveDrainageNetwork(
                 into: &elevations,
                 width: width,
                 height: height,
@@ -417,7 +421,17 @@ public enum TerrainGenerator {
                 runsHorizontally: drainageRunsHorizontally,
                 reversed: drainageReversed
             )
+        } else {
+            hydrology = classifyBaseHydrology(
+                elevations: elevations,
+                width: width,
+                height: height,
+                waterLevel: 0.2,
+                hasOceanBoundary: request.scenario.hasOceanBoundary
+            )
         }
+        try cancellationCheck?()
+        progress?(TerrainGenerationProgress(phase: .finished, fractionCompleted: 1))
 
         return TerrainLayout(
             seed: seed,
@@ -427,7 +441,8 @@ public enum TerrainGenerator {
             gridHeight: height,
             elevations: elevations,
             waterLevel: 0.2,
-            scenario: request.scenario
+            scenario: request.scenario,
+            hydrology: hydrology
         )
     }
 
@@ -484,8 +499,10 @@ public enum TerrainGenerator {
         seed: UInt64,
         runsHorizontally: Bool,
         reversed: Bool
-    ) {
-        guard width >= 3, height >= 3, elevations.count == width * height else { return }
+    ) -> HydrologyLayout {
+        guard width >= 3, height >= 3, elevations.count == width * height else {
+            return HydrologyLayout()
+        }
 
         let majorCount = runsHorizontally ? width : height
         let lateralCount = runsHorizontally ? height : width
@@ -495,6 +512,10 @@ public enum TerrainGenerator {
         let waterValue = UInt16((waterLevel * Double(UInt16.max)).rounded())
         var generator = SeededGenerator(seed: seed &+ 0xD1B54A32D192ED03)
         var receiver = Array(repeating: -1, count: cellCount)
+        var surfaceCodes = Array(
+            repeating: HydrologySurface.land.rawValue,
+            count: cellCount
+        )
         var accumulation = (0..<cellCount).map { index in
             0.72 + hashNoise(
                 x: index % width,
@@ -541,6 +562,31 @@ public enum TerrainGenerator {
                     }
                 }
                 receiver[currentIndex] = bestIndex
+            }
+        }
+
+        let watershedCount = 4
+        var watershedIDs = Array(repeating: UInt16(0), count: cellCount)
+        var drainageCellCounts = Array(repeating: 0, count: watershedCount + 1)
+        for major in stride(from: majorCount - 1, through: 0, by: -1) {
+            for lateral in 0..<lateralCount {
+                let coordinate = coordinates(major: major, lateral: lateral)
+                let index = coordinate.row * width + coordinate.column
+                let downstream = receiver[index]
+                let watershedID: UInt16
+                if downstream >= 0, watershedIDs[downstream] > 0 {
+                    watershedID = watershedIDs[downstream]
+                } else {
+                    watershedID = UInt16(
+                        min(
+                            watershedCount,
+                            lateral * watershedCount / max(1, lateralCount)
+                                + 1
+                        )
+                    )
+                }
+                watershedIDs[index] = watershedID
+                drainageCellCounts[Int(watershedID)] += 1
             }
         }
 
@@ -593,6 +639,7 @@ public enum TerrainGenerator {
                         elevations[row * width + column],
                         UInt16(carved.rounded())
                     )
+                    surfaceCodes[row * width + column] = HydrologySurface.river.rawValue
                 }
             }
             }
@@ -631,9 +678,99 @@ public enum TerrainGenerator {
                         elevations[row * width + column],
                         UInt16(Double(waterValue) * 0.955)
                     )
+                    surfaceCodes[row * width + column] = HydrologySurface.lake.rawValue
                 }
             }
         }
+
+        let waterSurfaces = surfaceCodes
+        for row in 1..<(height - 1) {
+            for column in 1..<(width - 1) {
+                let index = row * width + column
+                guard surfaceCodes[index] == HydrologySurface.land.rawValue else { continue }
+                let elevation = Double(elevations[index]) / Double(UInt16.max)
+                guard elevation <= waterLevel + 0.16 else { continue }
+
+                var adjacentLake = false
+                var adjacentMajorRiver = false
+                for rowOffset in -2...2 {
+                    for columnOffset in -2...2 {
+                        let neighborRow = row + rowOffset
+                        let neighborColumn = column + columnOffset
+                        guard neighborRow >= 0, neighborRow < height,
+                              neighborColumn >= 0, neighborColumn < width
+                        else { continue }
+                        let neighborIndex = neighborRow * width + neighborColumn
+                        adjacentLake = adjacentLake
+                            || waterSurfaces[neighborIndex] == HydrologySurface.lake.rawValue
+                        adjacentMajorRiver = adjacentMajorRiver
+                            || (waterSurfaces[neighborIndex] == HydrologySurface.river.rawValue
+                                && accumulation[neighborIndex] >= streamThreshold * 1.8)
+                    }
+                }
+
+                let moistureNoise = hashNoise(
+                    x: column,
+                    y: row,
+                    seed: seed &+ 0xA24BAED4963EE407
+                )
+                if adjacentLake || (adjacentMajorRiver && moistureNoise > 0.38) {
+                    surfaceCodes[index] = HydrologySurface.wetland.rawValue
+                }
+            }
+        }
+
+        let outlets = (1...watershedCount).map { watershedIndex in
+            let lateral = min(
+                lateralCount - 1,
+                (watershedIndex * 2 - 1) * lateralCount / (watershedCount * 2)
+            )
+            let coordinate = coordinates(major: majorCount - 1, lateral: lateral)
+            return WatershedOutlet(
+                id: UInt16(watershedIndex),
+                point: RoadPoint(
+                    x: Double(coordinate.column) / Double(width - 1) * MapScale.canvasWidth,
+                    y: Double(coordinate.row) / Double(height - 1) * MapScale.canvasHeight
+                ),
+                drainageCellCount: drainageCellCounts[watershedIndex]
+            )
+        }
+
+        return HydrologyLayout(
+            gridWidth: width,
+            gridHeight: height,
+            surfaceCodes: surfaceCodes,
+            watershedIDs: watershedIDs,
+            outlets: outlets
+        )
+    }
+
+    private static func classifyBaseHydrology(
+        elevations: [UInt16],
+        width: Int,
+        height: Int,
+        waterLevel: Double,
+        hasOceanBoundary: Bool
+    ) -> HydrologyLayout {
+        guard width >= 2, height >= 2, elevations.count == width * height else {
+            return HydrologyLayout()
+        }
+        let waterValue = UInt16((waterLevel * Double(UInt16.max)).rounded())
+        let surfaces = elevations.map { elevation in
+            if hasOceanBoundary, elevation == 0 {
+                HydrologySurface.ocean.rawValue
+            } else if elevation > 0, elevation <= waterValue {
+                HydrologySurface.lake.rawValue
+            } else {
+                HydrologySurface.land.rawValue
+            }
+        }
+        return HydrologyLayout(
+            gridWidth: width,
+            gridHeight: height,
+            surfaceCodes: surfaces,
+            watershedIDs: Array(repeating: 0, count: width * height)
+        )
     }
 
     private static func makeShoreline(
