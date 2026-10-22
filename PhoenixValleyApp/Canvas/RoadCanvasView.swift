@@ -63,6 +63,7 @@ struct RoadCanvasRepresentable: UIViewRepresentable {
                     mapScale: project.mapScale
                 ).structures
             }
+        view.displayProject(project.id)
         view.terrain = project.terrain
         view.roads = visibleRoads
         let pendingSourceRoadIDs = Set(
@@ -270,8 +271,19 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
     private var interchangeTouchOrigin: CGPoint?
     private var activeTouchIdentifier: ObjectIdentifier?
     private var activeNavigationRecognizers: Set<ObjectIdentifier> = []
-    private var zoomScale: CGFloat = 1
-    private var translation: CGPoint = .zero
+    private var navigationAnchor: RoadPoint?
+    private var navigationTouchCount = 0
+    private var viewport = CanvasViewport()
+    private var zoomScale: CGFloat { CGFloat(viewport.scale) }
+    private var projectID: UUID?
+    private var previousLayoutSize: CGSize = .zero
+    private let compass = CanvasCompassControl()
+    private let zoomInButton = UIButton(type: .system)
+    private let zoomOutButton = UIButton(type: .system)
+    private var northResetLink: CADisplayLink?
+    private var northResetStart: CFTimeInterval = 0
+    private var northResetRotation: Double = 0
+    private var isRotating = false
     private var hasPositionedInitialMap = false
     private var terrainImage: UIImage?
     private weak var panGesture: UIPanGestureRecognizer?
@@ -295,7 +307,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         isAccessibilityElement = true
         accessibilityLabel = "道路画布"
         accessibilityIdentifier = "road-canvas"
-        accessibilityTraits = [.allowsDirectInteraction]
+        accessibilityTraits = [.allowsDirectInteraction, .adjustable]
 
         if #available(iOS 17.0, *) {
             registerForTraitChanges(
@@ -318,6 +330,16 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         pinch.cancelsTouchesInView = true
         pinch.delegate = self
         addGestureRecognizer(pinch)
+        let rotation = UIRotationGestureRecognizer(target: self, action: #selector(handleRotation(_:)))
+        rotation.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        rotation.delegate = self
+        addGestureRecognizer(rotation)
+        compass.addTarget(self, action: #selector(resetNorth), for: .touchUpInside)
+        compass.accessibilityIdentifier = "canvas-compass"
+        addSubview(compass)
+        configureZoomButton(zoomInButton, symbol: "plus", label: "放大地图", identifier: "canvas-zoom-in", action: #selector(zoomIn))
+        configureZoomButton(zoomOutButton, symbol: "minus", label: "缩小地图", identifier: "canvas-zoom-out", action: #selector(zoomOut))
+        updateNavigationControls()
     }
 
     @objc private func userInterfaceStyleDidChange() {
@@ -331,14 +353,38 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        guard !hasPositionedInitialMap, bounds.width > 0, bounds.height > 0 else { return }
-        zoomScale = max(bounds.width / 1600, bounds.height / 1200)
-        translation = CGPoint(
-            x: bounds.midX - 800 * zoomScale,
-            y: bounds.midY - 600 * zoomScale
-        )
-        hasPositionedInitialMap = true
-        refreshAccessibilityElements()
+        let inset = safeAreaInsets
+        let controlX = max(inset.left + 8, bounds.width - inset.right - 58)
+        compass.frame = CGRect(x: controlX, y: inset.top + 18, width: 44, height: 44)
+        zoomInButton.frame = CGRect(x: controlX, y: inset.top + 72, width: 44, height: 44)
+        zoomOutButton.frame = CGRect(x: controlX, y: inset.top + 118, width: 44, height: 44)
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        if !hasPositionedInitialMap {
+            viewport = CanvasViewport(scale: max(bounds.width / 1600, bounds.height / 1200))
+            let center = viewport.screenPoint(for: RoadPoint(x: 800, y: 600))
+            viewport.pan(by: RoadPoint(x: bounds.midX - center.x, y: bounds.midY - center.y))
+            hasPositionedInitialMap = true
+        } else if previousLayoutSize != bounds.size {
+            viewport.pan(by: RoadPoint(x: (bounds.width - previousLayoutSize.width) / 2,
+                                      y: (bounds.height - previousLayoutSize.height) / 2))
+            constrainTranslation()
+        }
+        previousLayoutSize = bounds.size
+        navigationDidChange()
+    }
+
+    func displayProject(_ id: UUID) {
+        guard projectID != id else { return }
+        projectID = id
+        stopNorthReset()
+        cancelContentInteraction()
+        hasPositionedInitialMap = false
+        viewport = CanvasViewport()
+        isRotating = false
+        navigationAnchor = nil
+        navigationTouchCount = 0
+        updateNavigationControls()
+        setNeedsLayout()
     }
 
     override func draw(_ rect: CGRect) {
@@ -354,7 +400,8 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         context.fill(bounds)
 
         context.saveGState()
-        context.translateBy(x: translation.x, y: translation.y)
+        context.translateBy(x: viewport.translation.x, y: viewport.translation.y)
+        context.rotate(by: viewport.rotation)
         context.scaleBy(x: zoomScale, y: zoomScale)
         if showsTerrain {
             drawTerrain(in: context)
@@ -483,10 +530,14 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         _ gestureRecognizer: UIGestureRecognizer,
         shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
     ) -> Bool {
-        (gestureRecognizer is UIPanGestureRecognizer
-            && otherGestureRecognizer is UIPinchGestureRecognizer)
-            || (gestureRecognizer is UIPinchGestureRecognizer
-                && otherGestureRecognizer is UIPanGestureRecognizer)
+        let navigationTypes = { (gesture: UIGestureRecognizer) in
+            gesture is UIPanGestureRecognizer || gesture is UIPinchGestureRecognizer || gesture is UIRotationGestureRecognizer
+        }
+        return navigationTypes(gestureRecognizer) && navigationTypes(otherGestureRecognizer)
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        !(touch.view is UIControl)
     }
 
     @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
@@ -494,13 +545,8 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         guard recognizer.state == .began || recognizer.state == .changed else {
             return
         }
-        let delta = recognizer.translation(in: self)
-        translation.x += delta.x
-        translation.y += delta.y
-        constrainTranslation()
-        recognizer.setTranslation(.zero, in: self)
-        refreshAccessibilityElements()
-        setNeedsDisplay()
+        applyNavigation(from: recognizer)
+        navigationDidChange()
     }
 
     @objc private func handlePinch(_ recognizer: UIPinchGestureRecognizer) {
@@ -519,22 +565,135 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
             return
         }
         guard recognizer.numberOfTouches >= 2 else { return }
-        let anchor = recognizer.location(in: self)
-        let worldAtAnchor = worldPoint(for: anchor)
         let proposedScale = zoomScale * recognizer.scale
-        let nextScale = min(4, max(minimumZoomScale, proposedScale))
-        zoomScale = nextScale
-        translation = CGPoint(
-            x: anchor.x - worldAtAnchor.x * nextScale,
-            y: anchor.y - worldAtAnchor.y * nextScale
-        )
-        constrainTranslation()
+        applyNavigation(from: recognizer, scaleFactor: recognizer.scale)
         if proposedScale < minimumZoomScale - 0.001 {
             showMinimumZoomHint()
         }
         recognizer.scale = 1
+        navigationDidChange()
+    }
+
+    /// Every recognizer advances the same touch centroid. Transform around its previous
+    /// location before translating to the new one, so callback order cannot double-pan
+    /// a moving pinch/rotation anchor. A changing touch count starts a new anchor.
+    private func applyNavigation(from recognizer: UIGestureRecognizer, scaleFactor: Double = 1, rotationDelta: Double = 0) {
+        let location = recognizer.location(in: self)
+        let current = RoadPoint(x: location.x, y: location.y)
+        let previous = navigationTouchCount == recognizer.numberOfTouches
+            ? navigationAnchor ?? current : current
+        viewport.navigate(scaleFactor: scaleFactor, rotationDelta: rotationDelta, anchor: previous, minimumScale: minimumZoomScale)
+        viewport.pan(by: current - previous)
+        navigationAnchor = current
+        navigationTouchCount = recognizer.numberOfTouches
+        constrainTranslation()
+    }
+
+    private var navigationAccessibilityElements: [Any] {
+        let zoom = CanvasZoomAccessibilityElement(accessibilityContainer: self)
+        zoom.accessibilityIdentifier = "canvas-viewport"
+        zoom.accessibilityLabel = "地图缩放"
+        zoom.accessibilityHint = accessibilityValue
+        zoom.accessibilityValue = String(format: "%.0f%%", viewport.scale * 100)
+        zoom.accessibilityTraits = [.adjustable]
+        // Keep this virtual map control clear of real buttons and overlaid palettes.
+        // A full-view accessibility frame would mask their hit targets.
+        zoom.accessibilityFrameInContainerSpace = bounds.insetBy(
+            dx: bounds.width * 0.35, dy: bounds.height * 0.35
+        )
+        zoom.adjust = { [weak self] increase in self?.zoom(by: increase ? 1.35 : 1 / 1.35) }
+        return [zoom] + (compass.isHidden ? [] : [compass]) + [zoomInButton, zoomOutButton]
+    }
+
+    private func configureZoomButton(_ button: UIButton, symbol: String, label: String, identifier: String, action: Selector) {
+        var config = UIButton.Configuration.bordered()
+        config.image = UIImage(systemName: symbol)
+        config.baseForegroundColor = .label
+        config.background.backgroundColor = .secondarySystemBackground
+        config.cornerStyle = .medium
+        button.configuration = config
+        button.accessibilityLabel = label
+        button.accessibilityIdentifier = identifier
+        button.addTarget(self, action: action, for: .touchUpInside)
+        addSubview(button)
+    }
+
+    @objc private func zoomIn() { zoom(by: 1.35) }
+    @objc private func zoomOut() { zoom(by: 1 / 1.35) }
+    override func accessibilityIncrement() { zoomIn() }
+    override func accessibilityDecrement() { zoomOut() }
+
+    private func zoom(by factor: Double) {
+        stopNorthReset()
+        cancelContentInteraction()
+        viewport.navigate(scaleFactor: factor, anchor: RoadPoint(x: bounds.midX, y: bounds.midY), minimumScale: minimumZoomScale)
+        constrainTranslation()
+        showScaleBar()
+        scheduleScaleBarHide()
+        navigationDidChange()
+    }
+
+    @objc private func handleRotation(_ recognizer: UIRotationGestureRecognizer) {
+        isRotating = recognizer.state == .began || recognizer.state == .changed
+        updateNavigationState(for: recognizer)
+        if isRotating {
+            applyNavigation(from: recognizer, rotationDelta: recognizer.rotation)
+            recognizer.rotation = 0
+        }
+        navigationDidChange()
+    }
+
+    private func updateNavigationControls() {
+        compass.heading = viewport.rotation
+        compass.isHidden = viewport.isNorthUp && !isRotating && northResetLink == nil
+        zoomInButton.isEnabled = zoomScale < 4 - 0.001
+        zoomOutButton.isEnabled = zoomScale > minimumZoomScale + 0.001
+        zoomInButton.accessibilityValue = String(format: "%.0f%%", viewport.scale * 100)
+        zoomOutButton.accessibilityValue = zoomInButton.accessibilityValue
+    }
+
+    private func navigationDidChange() {
+        updateNavigationControls()
         refreshAccessibilityElements()
         setNeedsDisplay()
+    }
+
+    @objc private func resetNorth() {
+        stopNorthReset()
+        cancelContentInteraction()
+        if UIAccessibility.isReduceMotionEnabled || viewport.isNorthUp {
+            setHeading(0)
+            navigationDidChange()
+            return
+        }
+        northResetRotation = viewport.rotation
+        northResetStart = CACurrentMediaTime()
+        let link = CADisplayLink(target: self, selector: #selector(advanceNorthReset(_:)))
+        northResetLink = link
+        link.add(to: .main, forMode: .common)
+    }
+
+    @objc private func advanceNorthReset(_ link: CADisplayLink) {
+        let progress = min(1, (CACurrentMediaTime() - northResetStart) / 0.28)
+        let eased = progress * progress * (3 - 2 * progress)
+        setHeading(northResetRotation * (1 - eased))
+        if progress >= 1 { stopNorthReset() }
+        navigationDidChange()
+    }
+
+    private func setHeading(_ heading: Double) {
+        viewport.navigate(rotationDelta: heading - viewport.rotation, anchor: RoadPoint(x: bounds.midX, y: bounds.midY), minimumScale: minimumZoomScale)
+        constrainTranslation()
+    }
+
+    private func stopNorthReset() {
+        northResetLink?.invalidate()
+        northResetLink = nil
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil { stopNorthReset() }
     }
 
     private func showScaleBar() {
@@ -559,27 +718,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
     }
 
     private func constrainTranslation() {
-        let contentWidth = 1600 * zoomScale
-        let contentHeight = 1200 * zoomScale
-        let overscroll: CGFloat = 36
-
-        if contentWidth <= bounds.width {
-            translation.x = (bounds.width - contentWidth) / 2
-        } else {
-            translation.x = min(
-                overscroll,
-                max(bounds.width - contentWidth - overscroll, translation.x)
-            )
-        }
-
-        if contentHeight <= bounds.height {
-            translation.y = (bounds.height - contentHeight) / 2
-        } else {
-            translation.y = min(
-                overscroll,
-                max(bounds.height - contentHeight - overscroll, translation.y)
-            )
-        }
+        viewport.constrain(to: RoadPoint(x: bounds.width, y: bounds.height))
     }
 
     private func showMinimumZoomHint() {
@@ -666,10 +805,24 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         let identifier = ObjectIdentifier(recognizer)
         switch recognizer.state {
         case .began:
+            if activeNavigationRecognizers.isEmpty {
+                navigationAnchor = nil
+                navigationTouchCount = 0
+            }
             activeNavigationRecognizers.insert(identifier)
+            stopNorthReset()
             cancelContentInteraction()
         case .ended, .cancelled, .failed:
-            activeNavigationRecognizers.remove(identifier)
+            let wasActive = activeNavigationRecognizers.remove(identifier) != nil
+            if wasActive && activeNavigationRecognizers.isEmpty {
+                viewport.snapToNorthIfClose(
+                    anchor: navigationAnchor ?? RoadPoint(x: bounds.midX, y: bounds.midY)
+                )
+                constrainTranslation()
+                navigationAnchor = nil
+                navigationTouchCount = 0
+                navigationDidChange()
+            }
         default:
             break
         }
@@ -1001,10 +1154,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
     }
 
     private func worldPoint(for screenPoint: CGPoint) -> RoadPoint {
-        RoadPoint(
-            x: Double((screenPoint.x - translation.x) / zoomScale),
-            y: Double((screenPoint.y - translation.y) / zoomScale)
-        )
+        viewport.worldPoint(for: RoadPoint(x: screenPoint.x, y: screenPoint.y))
     }
 
     func refreshAccessibilityElements() {
@@ -1013,15 +1163,15 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
             return
         }
 
-        var elements: [UIAccessibilityElement] = []
+        var elements: [Any] = navigationAccessibilityElements
         guard isSelecting || isEditingInterchange else {
-            isAccessibilityElement = true
-            accessibilityElements = nil
+            isAccessibilityElement = false
+            accessibilityElements = navigationAccessibilityElements
             return
         }
         isAccessibilityElement = false
         if isEditingInterchange {
-            accessibilityElements = interchangeAccessibilityElements()
+            accessibilityElements = navigationAccessibilityElements + interchangeAccessibilityElements()
             return
         }
         let roadsBySource = Dictionary(grouping: roads, by: \.sourceRoadID)
@@ -1339,10 +1489,8 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
     }
 
     private func screenPoint(for canvasPoint: RoadPoint) -> CGPoint {
-        CGPoint(
-            x: CGFloat(canvasPoint.x) * zoomScale + translation.x,
-            y: CGFloat(canvasPoint.y) * zoomScale + translation.y
-        )
+        let point = viewport.screenPoint(for: canvasPoint)
+        return CGPoint(x: point.x, y: point.y)
     }
 
     private func drawTerrain(in context: CGContext) {
@@ -2501,4 +2649,57 @@ private extension RoadKind {
         }
         return level == .tunnel ? base.withAlphaComponent(0.55) : base
     }
+}
+
+/// Upright screen control; only its north pointer follows the map's camera heading.
+private final class CanvasCompassControl: UIControl {
+    var heading: Double = 0 {
+        didSet {
+            let degrees = (360 - heading * 180 / .pi).truncatingRemainder(dividingBy: 360)
+            accessibilityValue = String(format: "地图朝向 %.0f 度", degrees)
+            setNeedsDisplay()
+        }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isOpaque = false
+        isAccessibilityElement = true
+        accessibilityLabel = "指南针，恢复指北"
+        accessibilityHint = "双击将地图转为北方朝上"
+        accessibilityTraits = .button
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func draw(_ rect: CGRect) {
+        guard let context = UIGraphicsGetCurrentContext() else { return }
+        let circle = bounds.insetBy(dx: 2, dy: 2)
+        context.setFillColor(UIColor.secondarySystemBackground.cgColor)
+        context.fillEllipse(in: circle)
+        context.setStrokeColor(UIColor.separator.cgColor)
+        context.setLineWidth(1)
+        context.strokeEllipse(in: circle)
+        context.translateBy(x: bounds.midX, y: bounds.midY)
+        context.rotate(by: heading)
+        context.setFillColor(UIColor.systemRed.cgColor)
+        context.move(to: CGPoint(x: 0, y: -16))
+        context.addLine(to: CGPoint(x: -5, y: 3))
+        context.addLine(to: CGPoint(x: 5, y: 3))
+        context.closePath()
+        context.fillPath()
+        context.setFillColor(UIColor.secondaryLabel.cgColor)
+        context.move(to: CGPoint(x: 0, y: 16))
+        context.addLine(to: CGPoint(x: -5, y: 3))
+        context.addLine(to: CGPoint(x: 5, y: 3))
+        context.closePath()
+        context.fillPath()
+    }
+}
+
+private final class CanvasZoomAccessibilityElement: UIAccessibilityElement {
+    var adjust: ((Bool) -> Void)?
+    override func accessibilityIncrement() { adjust?(true) }
+    override func accessibilityDecrement() { adjust?(false) }
 }
