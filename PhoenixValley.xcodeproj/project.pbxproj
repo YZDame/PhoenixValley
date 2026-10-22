@@ -19,6 +19,8 @@
 		A1000000000000000000000A /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000A /* PrivacyInfo.xcprivacy */; };
 		A1000000000000000000000B /* RoadSelectionInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000B /* RoadSelectionInspector.swift */; };
 		A1000000000000000000000C /* RoadInterchangeInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000C /* RoadInterchangeInspector.swift */; };
+		F71000000000000000000001 /* RealMapImportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F72000000000000000000001 /* RealMapImportView.swift */; };
+		D10000000000000000000001 = { "isa" = "PBXBuildFile"; "fileRef" = "D20000000000000000000001"; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -36,6 +38,9 @@
 		A2000000000000000000000C /* RoadInterchangeInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoadInterchangeInspector.swift; sourceTree = "<group>"; };
 		A2000000000000000000000D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A2000000000000000000000E /* PhoenixValley.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PhoenixValley.entitlements; sourceTree = "<group>"; };
+		F72000000000000000000001 /* RealMapImportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealMapImportView.swift; sourceTree = "<group>"; };
+		D20000000000000000000001 = { "path" = "RealMapImportUITests.swift"; "isa" = "PBXFileReference"; "lastKnownFileType" = "sourcecode.swift"; "sourceTree" = "<group>"; };
+		D20000000000000000000002 = { "path" = "PhoenixValleyImportUITests.xctest"; "isa" = "PBXFileReference"; "includeInIndex" = "0"; "explicitFileType" = "wrapper.cfbundle"; "sourceTree" = "BUILT_PRODUCTS_DIR"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -54,6 +59,7 @@
 			isa = PBXGroup;
 			children = (
 				A40000000000000000000002 /* PhoenixValleyApp */,
+                D40000000000000000000001 /* PhoenixValleyImportUITests */,
 				A40000000000000000000007 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -94,6 +100,7 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000002 /* RoadEditorView.swift */,
+				F72000000000000000000001 /* RealMapImportView.swift */,
 				A20000000000000000000003 /* RoadDocumentStore.swift */,
 				A2000000000000000000000B /* RoadSelectionInspector.swift */,
 				A2000000000000000000000C /* RoadInterchangeInspector.swift */,
@@ -113,6 +120,7 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000008 /* PhoenixValley.app */,
+                D20000000000000000000002 /* PhoenixValleyImportUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -126,6 +134,7 @@
 			path = SystemIntents;
 			sourceTree = "<group>";
 		};
+		D40000000000000000000001 = { "path" = "PhoenixValleyImportUITests"; "isa" = "PBXGroup"; "children" = ( "D20000000000000000000001", ); "sourceTree" = "<group>"; };
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -149,6 +158,7 @@
 			productReference = A20000000000000000000008 /* PhoenixValley.app */;
 			productType = "com.apple.product-type.application";
 		};
+		D50000000000000000000001 = { "buildConfigurationList" = "D80000000000000000000001"; "productReference" = "D20000000000000000000002"; "productType" = "com.apple.product-type.bundle.ui-testing"; "productName" = "PhoenixValleyImportUITests"; "isa" = "PBXNativeTarget"; "buildPhases" = ( "D60000000000000000000001", ); "dependencies" = ( "D90000000000000000000001", ); "name" = "PhoenixValleyImportUITests"; "buildRules" = (); };
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -187,6 +197,7 @@
 			projectRoot = "";
 			targets = (
 				A50000000000000000000001 /* PhoenixValley */,
+                D50000000000000000000001 /* PhoenixValleyImportUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -210,6 +221,7 @@
 			files = (
 				A10000000000000000000001 /* PhoenixValleyApp.swift in Sources */,
 				A10000000000000000000002 /* RoadEditorView.swift in Sources */,
+				F71000000000000000000001 /* RealMapImportView.swift in Sources */,
 				A10000000000000000000003 /* RoadDocumentStore.swift in Sources */,
 				A10000000000000000000004 /* ProjectFileStore.swift in Sources */,
 				A10000000000000000000005 /* RoadCanvasView.swift in Sources */,
@@ -220,7 +232,16 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D60000000000000000000001 = { "isa" = "PBXSourcesBuildPhase"; "buildActionMask" = "2147483647"; "files" = ( "D10000000000000000000001", ); "runOnlyForDeploymentPostprocessing" = "0"; };
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		D90000000000000000000001 = { "isa" = "PBXTargetDependency"; "target" = "A50000000000000000000001"; "targetProxy" = "D90000000000000000000002"; };
+/* End PBXTargetDependency section */
+
+/* Begin PBXContainerItemProxy section */
+		D90000000000000000000002 = { "isa" = "PBXContainerItemProxy"; "containerPortal" = "A90000000000000000000001"; "remoteGlobalIDString" = "A50000000000000000000001"; "remoteInfo" = "PhoenixValley"; "proxyType" = "1"; };
+/* End PBXContainerItemProxy section */
 
 /* Begin XCBuildConfiguration section */
 		B10000000000000000000001 /* Debug */ = {
@@ -312,6 +333,8 @@
 			};
 			name = Release;
 		};
+		D70000000000000000000001 = { "isa" = "XCBuildConfiguration"; "buildSettings" = { "GENERATE_INFOPLIST_FILE" = "YES"; "SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator"; "TEST_TARGET_NAME" = "PhoenixValley"; "IPHONEOS_DEPLOYMENT_TARGET" = "17.0"; "PRODUCT_BUNDLE_IDENTIFIER" = "com.leyudame.PhoenixValley.ImportUITests"; "CODE_SIGN_STYLE" = "Automatic"; "SDKROOT" = "iphoneos"; "SWIFT_VERSION" = "6.0"; "TARGETED_DEVICE_FAMILY" = "2"; "DEVELOPMENT_TEAM" = "ZDQ8DJ5YST"; "PRODUCT_NAME" = "$(TARGET_NAME)"; }; "name" = "Debug"; };
+		D70000000000000000000002 = { "isa" = "XCBuildConfiguration"; "buildSettings" = { "GENERATE_INFOPLIST_FILE" = "YES"; "SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator"; "TEST_TARGET_NAME" = "PhoenixValley"; "IPHONEOS_DEPLOYMENT_TARGET" = "17.0"; "PRODUCT_BUNDLE_IDENTIFIER" = "com.leyudame.PhoenixValley.ImportUITests"; "CODE_SIGN_STYLE" = "Automatic"; "SDKROOT" = "iphoneos"; "SWIFT_VERSION" = "6.0"; "TARGETED_DEVICE_FAMILY" = "2"; "DEVELOPMENT_TEAM" = "ZDQ8DJ5YST"; "PRODUCT_NAME" = "$(TARGET_NAME)"; }; "name" = "Release"; };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -333,6 +356,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		D80000000000000000000001 = { "isa" = "XCConfigurationList"; "defaultConfigurationIsVisible" = "0"; "defaultConfigurationName" = "Release"; "buildConfigurations" = ( "D70000000000000000000001", "D70000000000000000000002", ); };
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */

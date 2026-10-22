@@ -35,6 +35,7 @@ private struct ProjectSidebar: View {
     @State private var deleteTarget: DeleteTarget?
     @State private var proposedName = ""
     @State private var collapsedGroups: Set<UUID> = []
+    @State private var showsRealMapImporter = false
 
     var body: some View {
         List(selection: selectedProject) {
@@ -97,6 +98,11 @@ private struct ProjectSidebar: View {
                     }
                     .disabled(document.terrainGenerationState.isGenerating)
                     .keyboardShortcut("n", modifiers: .command)
+                    Button("导入真实地图", systemImage: "globe.asia.australia") {
+                        showsRealMapImporter = true
+                    }
+                    .accessibilityIdentifier("import-real-map")
+                    Divider()
                     Button("新建分组", systemImage: "folder.badge.plus") {
                         let id = document.createGroup()
                         if let group = document.groups.first(where: { $0.id == id }) {
@@ -107,6 +113,9 @@ private struct ProjectSidebar: View {
                     Label("新建", systemImage: "plus")
                 }
             }
+        }
+        .sheet(isPresented: $showsRealMapImporter) {
+            RealMapImportView(document: document)
         }
         .alert(renameTarget?.title ?? "重命名", isPresented: renamePresentation) {
             TextField("名称", text: $proposedName)
@@ -499,6 +508,11 @@ private struct RoadCanvasWorkspace: View {
             }
         )
         .ignoresSafeArea()
+        .overlay(alignment: .bottomTrailing) {
+            realWorldAttribution
+                .padding(.trailing, 16)
+                .padding(.bottom, 94)
+        }
         .overlay(alignment: .topTrailing) {
             if document.isEditingInterchange {
                 RoadInterchangeInspector(document: document)
@@ -590,6 +604,27 @@ private struct RoadCanvasWorkspace: View {
             Button("好", role: .cancel) { exportErrorMessage = nil }
         } message: {
             Text(exportErrorMessage ?? "未知错误")
+        }
+    }
+
+    @ViewBuilder
+    private var realWorldAttribution: some View {
+        if let map = document.project.realWorldMap {
+            Group {
+                if map.source == .osmXML {
+                    Link("© OpenStreetMap contributors · ODbL",
+                         destination: URL(string: "https://www.openstreetmap.org/copyright")!)
+                        .frame(minHeight: 44)
+                } else {
+                    Text(map.source == .kml ? "来源：导入的 KML" : "来源：导入的高程网格")
+                }
+            }
+            .font(.caption2)
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 3)
+            .background(.regularMaterial, in: Capsule())
+            .accessibilityIdentifier("real-map-attribution")
         }
     }
 
@@ -1160,12 +1195,14 @@ private struct MapAppearancePopover: View {
                         }
                         .pickerStyle(.menu)
                         .labelsHidden()
-                        .disabled(!document.project.roads.isEmpty)
+                        .disabled(document.project.realWorldMap != nil || !document.project.roads.isEmpty)
                         .accessibilityIdentifier("map-scale-picker")
                     }
 
                     Text(
-                        document.project.roads.isEmpty
+                        document.project.realWorldMap != nil
+                            ? "真实地图保留原始地理比例。"
+                            : document.project.roads.isEmpty
                             ? "绘路前选择；规划网格每格 \(gridCellDistanceDescription)。"
                             : "已有道路后锁定比例；规划网格每格 \(gridCellDistanceDescription)。"
                     )
@@ -1494,6 +1531,18 @@ private struct MapContentThumbnail: View {
             )
         )
 
+        if let map = project.realWorldMap {
+            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(palette.plain))
+            if project.layerVisibility.showsTerrain {
+                for feature in map.features {
+                    if feature.kind == .water && !project.layerVisibility.showsHydrology { continue }
+                    let outline = path(for: feature.points, size: size, closes: true)
+                    context.fill(outline, with: .color(Color(cgColor: CartographicRenderer.featureColor(feature.kind, dark: project.theme == .midnight))))
+                }
+            }
+            drawRoads(in: &context, size: size, palette: palette)
+            return
+        }
         if project.layerVisibility.showsTerrain {
             let shoreline = path(
                 for: project.terrain.shoreline,

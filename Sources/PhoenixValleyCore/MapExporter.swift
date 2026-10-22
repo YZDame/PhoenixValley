@@ -152,7 +152,9 @@ public enum MapExporter {
         background.setFill(in: context)
         context.fill(fullCanvas)
 
-        if project.layerVisibility.showsTerrain {
+        if let map = project.realWorldMap {
+            CartographicRenderer.draw(map, theme: project.theme, showsTerrain: project.layerVisibility.showsTerrain, showsHydrology: project.layerVisibility.showsHydrology, in: context)
+        } else if project.layerVisibility.showsTerrain {
             if project.terrain.scenario.hasOceanBoundary,
                let shoreline = shorelinePath(project.terrain.shoreline) {
                 palette.plain.setFill(in: context)
@@ -168,6 +170,7 @@ public enum MapExporter {
                     palette: palette,
                     in: context
                 )
+                CartographicRenderer.drawRelief(project.terrain, mapScale: project.mapScale, in: context)
                 if project.showsGrid {
                     drawGrid(color: palette.grid, in: context)
                 }
@@ -192,6 +195,7 @@ public enum MapExporter {
                     palette: palette,
                     in: context
                 )
+                CartographicRenderer.drawRelief(project.terrain, mapScale: project.mapScale, in: context)
                 if project.showsGrid {
                     drawGrid(color: palette.grid, in: context)
                 }
@@ -218,6 +222,9 @@ public enum MapExporter {
             in: context
         )
         drawScaleBar(project.mapScale, in: context)
+        if let map = project.realWorldMap {
+            CartographicRenderer.drawAttribution(map.attribution, in: context, canvasSize: fullCanvas.size)
+        }
     }
 
     private static func shorelinePath(_ points: [RoadPoint]) -> CGPath? {
@@ -704,7 +711,9 @@ public enum MapExporter {
         )
 
         let shoreData = svgPathData(project.terrain.shoreline, closes: true)
-        if project.layerVisibility.showsTerrain,
+        if let map = project.realWorldMap {
+            appendSVGRealWorldMap(map, project: project, to: &body)
+        } else if project.layerVisibility.showsTerrain,
            project.terrain.scenario.hasOceanBoundary,
            !shoreData.isEmpty {
             body.append(
@@ -729,6 +738,7 @@ public enum MapExporter {
                 to: &body
             )
             body.append("</g>")
+            appendSVGProceduralRelief(project, to: &body)
             if project.showsGrid {
                 appendSVGGrid(color: palette.grid, to: &body)
             }
@@ -761,6 +771,7 @@ public enum MapExporter {
                 to: &body
             )
             body.append("</g>")
+            appendSVGProceduralRelief(project, to: &body)
             if project.showsGrid {
                 appendSVGGrid(color: palette.grid, to: &body)
             }
@@ -786,6 +797,9 @@ public enum MapExporter {
             to: &body
         )
         appendSVGScaleBar(project.mapScale, to: &body)
+        if let map = project.realWorldMap {
+            body.append(#"<g id="map-attribution"><rect x="16" y="1169" width="1568" height="23" fill="white" fill-opacity="0.9"/><text x="24" y="1185" font-family="Helvetica, sans-serif" font-size="12" fill="rgb(48,48,48)">\#(xmlEscaped(map.attribution))</text></g>"#)
+        }
         let title = xmlEscaped(project.name)
         let svg = """
         <?xml version="1.0" encoding="UTF-8"?>
@@ -799,6 +813,48 @@ public enum MapExporter {
             throw MapExporterError.couldNotEncodeText
         }
         return data
+    }
+
+    private static func appendSVGRealWorldMap(_ map: RealWorldMap, project: RoadProject, to body: inout [String]) {
+        let dark = project.theme == .midnight
+        body.append(#"<rect width="1600" height="1200" fill="\#(dark ? "#212b30" : "#f2f0e8")"/>"#)
+        guard project.layerVisibility.showsTerrain else { return }
+        body.append(#"<g id="geographic-features">"#)
+        for kind in [GeoMapFeatureKind.park, .forest, .water, .building] {
+            if kind == .water && !project.layerVisibility.showsHydrology { continue }
+            let rgb = CartographicRenderer.featureColor(kind, dark: dark).components ?? [0,0,0,1]
+            let color = ExportColor(red: rgb[0], green: rgb[1], blue: rgb[2])
+            for feature in map.features where feature.kind == kind && feature.points.count >= 3 {
+                body.append(#"<path data-feature-kind="\#(kind.rawValue)" d="\#(svgPathData(feature.points, closes: true))" fill="\#(color.hex)" stroke="\#(dark ? "white" : "#404040")" stroke-opacity="0.12" stroke-width="0.7"/>"#)
+            }
+        }
+        body.append("</g>")
+        // Reuse the DEM renderer as a compact embedded relief image; geometry stays vector.
+        if let elevation = map.elevation, let png = reliefPNG(width: elevation.width, height: elevation.height, meters: elevation.meters, metersPerPoint: map.bounds.metersPerPoint) {
+            body.append(#"<image width="1600" height="1200" href="data:image/png;base64,\#(png.base64EncodedString())"/>"#)
+        }
+    }
+
+    private static func appendSVGProceduralRelief(_ project: RoadProject, to body: inout [String]) {
+        let terrain = project.terrain
+        guard terrain.hasElevationData else { return }
+        let scale = RoadEngineeringConfiguration.standard.elevationScaleMeters
+        let meters = terrain.elevations.map { Optional(Double($0) / Double(UInt16.max) * scale) }
+        if let png = reliefPNG(width: terrain.gridWidth, height: terrain.gridHeight, meters: meters, metersPerPoint: project.mapScale.metersPerPoint) {
+            body.append(#"<image id="terrain-relief" width="1600" height="1200" href="data:image/png;base64,\#(png.base64EncodedString())"/>"#)
+        }
+    }
+
+    private static func reliefPNG(width: Int, height: Int, meters: [Double?], metersPerPoint: Double) -> Data? {
+        guard let context = CGContext(data: nil, width: 1600, height: 1200, bitsPerComponent: 8, bytesPerRow: 6400, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        prepareTopLeftCoordinateSystem(context)
+        CartographicRenderer.drawRelief(width: width, height: height, meters: meters, widthMeters: metersPerPoint * 1600, heightMeters: metersPerPoint * 1200, in: context)
+        guard let image = context.makeImage() else { return nil }
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return data as Data
     }
 
     private static func appendSVGElevation(
@@ -1125,7 +1181,7 @@ public enum MapExporter {
     private static func geoJSONData(for project: RoadProject) throws -> Data {
         let metersPerPoint = project.mapScale.metersPerPoint
         var features: [[String: Any]] = []
-        if project.layerVisibility.showsTerrain,
+        if project.realWorldMap == nil, project.layerVisibility.showsTerrain,
            let first = project.terrain.shoreline.first {
             var coordinates = project.terrain.shoreline.map {
                 [$0.x * metersPerPoint, $0.y * metersPerPoint]
@@ -1149,7 +1205,7 @@ public enum MapExporter {
         }
 
         let hydrology = project.terrain.hydrology
-        if project.layerVisibility.showsTerrain,
+        if project.realWorldMap == nil, project.layerVisibility.showsTerrain,
            project.layerVisibility.showsHydrology,
            hydrology.hasData {
             features.append([
@@ -1259,7 +1315,7 @@ public enum MapExporter {
             }
         }
 
-        let object: [String: Any] = [
+        var object: [String: Any] = [
             "type": "FeatureCollection",
             "name": project.name,
             "coordinateSystem": "PhoenixValley local Cartesian metres; origin top-left",
@@ -1272,6 +1328,52 @@ public enum MapExporter {
             ],
             "features": features,
         ]
+        if let map = project.realWorldMap {
+            // Existing planning features above use local metres. Convert every
+            // geometry together so roads, portals and piers share one CRS.
+            func coordinate(_ point: RoadPoint) -> [Double] {
+                let latitude = (map.bounds.minLatitude + map.bounds.maxLatitude) / 2
+                let longitude = (map.bounds.minLongitude + map.bounds.maxLongitude) / 2
+                return [longitude + (point.x - 800) * map.bounds.metersPerPoint / (111_195 * cos(latitude * .pi / 180)),
+                        latitude + (600 - point.y) * map.bounds.metersPerPoint / 111_195]
+            }
+            func reproject(_ value: Any) -> Any {
+                if let pair = value as? [Double], pair.count == 2 {
+                    return coordinate(RoadPoint(x: pair[0] / metersPerPoint, y: pair[1] / metersPerPoint))
+                }
+                if let values = value as? [Any] { return values.map(reproject) }
+                return value
+            }
+            for index in features.indices {
+                if var geometry = features[index]["geometry"] as? [String: Any], let coordinates = geometry["coordinates"] {
+                    geometry["coordinates"] = reproject(coordinates)
+                    features[index]["geometry"] = geometry
+                }
+            }
+            if project.layerVisibility.showsTerrain {
+                for (index, feature) in map.features.enumerated() where feature.points.count >= 3 {
+                    if feature.kind == .water && !project.layerVisibility.showsHydrology { continue }
+                    var ring = feature.points.map(coordinate)
+                    if ring.first != ring.last, let first = ring.first { ring.append(first) }
+                    var properties: [String: Any] = ["featureType": feature.kind.rawValue, "source": map.source.rawValue]
+                    if let name = feature.name { properties["name"] = name }
+                    features.append(["type": "Feature", "id": "geographic-\(index)", "properties": properties,
+                                     "geometry": ["type": "Polygon", "coordinates": [ring]]])
+                }
+            }
+            let southWest = coordinate(RoadPoint(x: 0, y: 1200))
+            let northEast = coordinate(RoadPoint(x: 1600, y: 0))
+            object["features"] = features
+            object["coordinateSystem"] = "WGS84 longitude, latitude (EPSG:4326)"
+            object["bbox"] = southWest + northEast
+            object["source"] = map.source.rawValue
+            object["attribution"] = map.attribution
+            object["importBounds"] = [map.bounds.minLongitude, map.bounds.minLatitude, map.bounds.maxLongitude, map.bounds.maxLatitude]
+            if let elevation = map.elevation {
+                object["elevation"] = ["unit": "metres", "minimum": elevation.minimumMeters,
+                                       "maximum": elevation.maximumMeters, "columns": elevation.width, "rows": elevation.height]
+            }
+        }
         return try JSONSerialization.data(
             withJSONObject: object,
             options: [.prettyPrinted, .sortedKeys]
@@ -1394,11 +1496,11 @@ private struct ExportPalette: Sendable {
                 grid: .init(red: 0, green: 0, blue: 0, alpha: 0.05),
                 contour: .init(red: 0.38, green: 0.31, blue: 0.23, alpha: 0.22),
                 shoreline: .init(red: 0, green: 0, blue: 0, alpha: 0.2),
-                roadCasing: .init(red: 1, green: 1, blue: 1),
-                motorway: .init(red: 0.18, green: 0.2, blue: 0.21),
-                arterial: .init(red: 0.32, green: 0.36, blue: 0.37),
-                street: .init(red: 0.72, green: 0.75, blue: 0.73),
-                railway: .init(red: 0.35, green: 0.25, blue: 0.2)
+                roadCasing: .init(red: 0.66, green: 0.64, blue: 0.58),
+                motorway: .init(red: 0.94, green: 0.75, blue: 0.44),
+                arterial: .init(red: 0.99, green: 0.88, blue: 0.64),
+                street: .init(red: 1, green: 0.99, blue: 0.97),
+                railway: .init(red: 0.36, green: 0.37, blue: 0.35)
             )
         case .ink:
             self.init(

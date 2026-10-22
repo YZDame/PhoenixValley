@@ -64,6 +64,7 @@ struct RoadCanvasRepresentable: UIViewRepresentable {
                 ).structures
             }
         view.terrain = project.terrain
+        view.realWorldMap = project.realWorldMap
         view.roads = visibleRoads
         let pendingSourceRoadIDs = Set(
             project.structureReviews
@@ -178,6 +179,9 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
     var terrain = TerrainGenerator.generate(seed: 1) {
         didSet { if oldValue != terrain { terrainImage = nil } }
     }
+    var realWorldMap: RealWorldMap? {
+        didSet { if oldValue != realWorldMap { terrainImage = nil } }
+    }
     var roads: [RoadSegment] = []
     var constructionIssues: [RoadConstructionIssue] = []
     var engineeringStructures: [RoadEngineeringStructure] = []
@@ -235,7 +239,9 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
             setNeedsDisplay()
         }
     }
-    var mapScale: MapScale = .standard
+    var mapScale: MapScale = .standard {
+        didSet { if oldValue != mapScale { terrainImage = nil } }
+    }
     var theme: MapTheme = .planning {
         didSet { if oldValue != theme { terrainImage = nil } }
     }
@@ -346,7 +352,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         let palette = theme.terrainPalette
         context.setFillColor(
             (
-                showsTerrain && terrain.scenario.hasOceanBoundary
+                showsTerrain && realWorldMap == nil && terrain.scenario.hasOceanBoundary
                     ? palette.water
                     : UIColor.systemBackground
             ).cgColor
@@ -356,7 +362,9 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         context.saveGState()
         context.translateBy(x: translation.x, y: translation.y)
         context.scaleBy(x: zoomScale, y: zoomScale)
-        if showsTerrain {
+        if let realWorldMap, !showsTerrain {
+            CartographicRenderer.draw(realWorldMap, theme: theme, showsTerrain: false, showsHydrology: showsHydrology, in: context)
+        } else if showsTerrain {
             drawTerrain(in: context)
         } else {
             context.setFillColor(palette.plain.cgColor)
@@ -1365,6 +1373,10 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
     }
 
     private func drawTerrainContent(in context: CGContext) {
+        if let realWorldMap {
+            CartographicRenderer.draw(realWorldMap, theme: theme, showsTerrain: true, showsHydrology: showsHydrology, in: context)
+            return
+        }
         let palette = theme.terrainPalette
         if !terrain.scenario.hasOceanBoundary {
             context.setFillColor(palette.plain.cgColor)
@@ -1372,6 +1384,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
             context.saveGState()
             context.clip(to: CGRect(x: 0, y: 0, width: 1600, height: 1200))
             drawElevationBands(in: context, palette: palette)
+            CartographicRenderer.drawRelief(terrain, mapScale: mapScale, in: context)
             if showsGrid {
                 drawGrid(in: context, color: palette.grid)
             }
@@ -1407,6 +1420,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         context.addPath(shorePath)
         context.clip()
         drawElevationBands(in: context, palette: palette)
+        CartographicRenderer.drawRelief(terrain, mapScale: mapScale, in: context)
         if showsGrid {
             drawGrid(in: context, color: palette.grid)
         }
@@ -2436,7 +2450,7 @@ private extension MapTheme {
     var roadPalette: RoadPalette {
         switch self {
         case .topographic: RoadPalette(motorway: UIColor.white, arterial: UIColor(red: 0.96, green: 0.83, blue: 0.28, alpha: 1), street: UIColor(red: 0.86, green: 0.93, blue: 0.82, alpha: 1), railway: UIColor(red: 0.28, green: 0.2, blue: 0.16, alpha: 1), casing: UIColor(red: 0.18, green: 0.25, blue: 0.22, alpha: 1))
-        case .planning: RoadPalette(motorway: UIColor(red: 0.18, green: 0.2, blue: 0.21, alpha: 1), arterial: UIColor(red: 0.32, green: 0.36, blue: 0.37, alpha: 1), street: UIColor(red: 0.72, green: 0.75, blue: 0.73, alpha: 1), railway: UIColor(red: 0.35, green: 0.25, blue: 0.2, alpha: 1), casing: UIColor.white)
+        case .planning: RoadPalette(motorway: UIColor(red: 0.94, green: 0.75, blue: 0.44, alpha: 1), arterial: UIColor(red: 0.99, green: 0.88, blue: 0.64, alpha: 1), street: UIColor(red: 1, green: 0.99, blue: 0.97, alpha: 1), railway: UIColor(red: 0.36, green: 0.37, blue: 0.35, alpha: 1), casing: UIColor(red: 0.66, green: 0.64, blue: 0.58, alpha: 1))
         case .ink: RoadPalette(motorway: UIColor(red: 0.08, green: 0.09, blue: 0.1, alpha: 1), arterial: UIColor(red: 0.2, green: 0.22, blue: 0.23, alpha: 1), street: UIColor(red: 0.48, green: 0.5, blue: 0.5, alpha: 1), railway: UIColor.black, casing: UIColor.white)
         case .coastal: RoadPalette(motorway: UIColor(red: 0.16, green: 0.3, blue: 0.36, alpha: 1), arterial: UIColor(red: 0.93, green: 0.52, blue: 0.22, alpha: 1), street: UIColor(red: 0.96, green: 0.88, blue: 0.62, alpha: 1), railway: UIColor(red: 0.35, green: 0.22, blue: 0.17, alpha: 1), casing: UIColor(red: 0.95, green: 0.92, blue: 0.78, alpha: 1))
         case .midnight: RoadPalette(motorway: UIColor(red: 0.68, green: 0.84, blue: 0.95, alpha: 1), arterial: UIColor(red: 0.98, green: 0.7, blue: 0.31, alpha: 1), street: UIColor(red: 0.55, green: 0.72, blue: 0.72, alpha: 1), railway: UIColor(red: 0.78, green: 0.55, blue: 0.84, alpha: 1), casing: UIColor(red: 0.04, green: 0.08, blue: 0.13, alpha: 1))
