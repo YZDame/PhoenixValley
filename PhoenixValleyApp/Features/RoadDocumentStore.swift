@@ -121,6 +121,7 @@ final class RoadDocumentStore {
             && libraryLoadSucceeded
             && loadResult.diagnostics.isEmpty
         let shouldRegenerateLoadedTerrain = !createdPlaceholder
+            && project.realWorldMap == nil
             && Self.needsTerrainRegeneration(project.terrain)
         if shouldMaterializePlaceholder || shouldRegenerateLoadedTerrain {
             scheduleTerrainGeneration(
@@ -1113,6 +1114,27 @@ final class RoadDocumentStore {
         }
     }
 
+    @discardableResult
+    func importRealWorldProject(_ importedProject: RoadProject) -> Bool {
+        guard importedProject.realWorldMap != nil else { return false }
+        var candidate = importedProject
+        candidate.groupID = project.groupID
+        candidate.updatedAt = .now
+        do {
+            try fileStore.save(candidate)
+            cancelTerrainGeneration()
+            publishPersistedProject(candidate)
+            clearRoadSelection()
+            resetInterchangeEditingState()
+            resetHistory()
+            saveErrorMessage = nil
+            return true
+        } catch {
+            saveErrorMessage = error.localizedDescription
+            return false
+        }
+    }
+
     func createNewMap(scenario: TerrainScenario? = nil) {
         let seed = UInt64.random(in: 1...UInt64.max)
         let number = projects.count + 1
@@ -1143,7 +1165,7 @@ final class RoadDocumentStore {
         clearRoadSelection()
         resetInterchangeEditingState()
         resetHistory()
-        if Self.needsTerrainRegeneration(selected.terrain) {
+        if selected.realWorldMap == nil, Self.needsTerrainRegeneration(selected.terrain) {
             scheduleTerrainGeneration(
                 seed: selected.terrain.seed,
                 scenario: selected.terrain.scenario,
@@ -1272,7 +1294,7 @@ final class RoadDocumentStore {
     }
 
     func setMapScale(_ mapScale: MapScale) {
-        guard project.roads.isEmpty, project.mapScale != mapScale else { return }
+        guard project.realWorldMap == nil, project.roads.isEmpty, project.mapScale != mapScale else { return }
         project.mapScale = mapScale
         project.updatedAt = .now
         persist()
@@ -1598,6 +1620,8 @@ final class RoadDocumentStore {
             case 9:
                 copy.trafficRules = .init()
                 copy.formatVersion = 10
+            case 10:
+                copy.formatVersion = RoadProject.currentFormatVersion
             default:
                 return copy
             }

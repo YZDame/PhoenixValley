@@ -1,4 +1,6 @@
 import Foundation
+import CoreGraphics
+import ImageIO
 #if canImport(FoundationXML)
 import FoundationXML
 #endif
@@ -189,4 +191,83 @@ private func engineeringExportProject() -> RoadProject {
         engineeringStructures: structures,
         mapScale: mapScale
     )
+}
+
+
+@Test func geographicExportsCarryLanduseAttributionAndWGS84() throws {
+    let project = try geographicExportProject()
+    let data = try MapExporter.data(for: project, format: .geoJSON)
+    let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    #expect(object["coordinateSystem"] as? String == "WGS84 longitude, latitude (EPSG:4326)")
+    #expect(object["attribution"] as? String == "© OpenStreetMap contributors")
+    let features = try #require(object["features"] as? [[String: Any]])
+    let types = features.compactMap { ($0["properties"] as? [String: Any])?["featureType"] as? String }
+    #expect(types.contains("water"))
+    #expect(types.contains("building"))
+    #expect(!types.contains("shoreline"))
+    #expect(!types.contains("hydrologySummary"))
+    let road = try #require(features.first { ($0["properties"] as? [String: Any])?["featureType"] as? String == "road" })
+    let geometry = try #require(road["geometry"] as? [String: Any])
+    let coordinates = try #require(geometry["coordinates"] as? [[Double]])
+    #expect(abs(coordinates[0][0] - 116.4) < 0.0000001)
+    #expect(abs(coordinates[0][1] - 39.9) < 0.0000001)
+    let svgData = try MapExporter.data(for: project, format: .svg)
+    let svg = try #require(String(data: svgData, encoding: .utf8))
+    #expect(XMLParser(data: svgData).parse())
+    #expect(svg.contains("© OpenStreetMap contributors"))
+    #expect(svg.contains("data-feature-kind=\"building\""))
+    #expect(!svg.contains("terrain-smooth"))
+}
+
+@Test func geographicRasterAndSVGRespectLayerVisibility() throws {
+    var project = try geographicExportProject()
+    // Inspect the actual PNG pixel inside the imported water polygon.
+    func waterPixel(_ project: RoadProject) throws -> [UInt8] {
+        let png = try MapExporter.data(for: project, format: .png)
+        let source = try #require(CGImageSourceCreateWithData(png as CFData, nil))
+        let image = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        let context = try #require(CGContext(data: nil, width: 1600, height: 1200, bitsPerComponent: 8, bytesPerRow: 6400, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: 1600, height: 1200))
+        let bytes = try #require(context.data).assumingMemoryBound(to: UInt8.self)
+        // Read both y orientations at the centre of a vertically symmetric polygon.
+        let index = (600 * 1600 + 400) * 4
+        return [bytes[index], bytes[index+1], bytes[index+2]]
+    }
+    let water = try waterPixel(project)
+    #expect(water[2] > water[0] + 25)
+    project.layerVisibility.showsHydrology = false
+    let land = try waterPixel(project)
+    #expect(land[0] > land[2])
+    let svg = try #require(String(data: MapExporter.data(for: project, format: .svg), encoding: .utf8))
+    #expect(!svg.contains("data-feature-kind=\"water\""))
+    #expect(svg.contains("data-feature-kind=\"building\""))
+    project.layerVisibility.showsTerrain = false
+    let hidden = try #require(String(data: MapExporter.data(for: project, format: .svg), encoding: .utf8))
+    #expect(!hidden.contains("geographic-features"))
+    #expect(hidden.contains("map-attribution"))
+}
+
+private func geographicExportProject() throws -> RoadProject {
+    var project = RoadProject(name: "Geographic", terrain: TerrainGenerator.generate(seed: 42), roads: [
+        RoadSegment(kind: .street, points: [RoadPoint(x: 800, y: 600), RoadPoint(x: 1000, y: 600)])
+    ])
+    let bounds = try GeoBounds(minLatitude: 39.89, minLongitude: 116.39, maxLatitude: 39.91, maxLongitude: 116.41)
+    project.mapScale = MapScale(metersPerPoint: bounds.metersPerPoint)
+    project.realWorldMap = RealWorldMap(bounds: bounds, source: .osmXML, attribution: "© OpenStreetMap contributors", features: [
+        GeoMapFeature(kind: .water, points: [RoadPoint(x: 300,y: 300),RoadPoint(x: 500,y: 300),RoadPoint(x: 500,y: 900),RoadPoint(x: 300,y: 900)]),
+        GeoMapFeature(kind: .building, points: [RoadPoint(x: 1000,y: 300),RoadPoint(x: 1040,y: 300),RoadPoint(x: 1040,y: 350),RoadPoint(x: 1000,y: 350)])
+    ], elevation: nil, summary: GeoImportSummary(inputPointCount: 10, retainedPointCount: 10, roadCount: 1, featureCount: 2, simplificationMeters: 8, warnings: []))
+    return project
+}
+
+@Test func terrainReliefUsesActualSlopeAndLeavesMissingCellsTransparent() throws {
+    func shadedPixels(_ meters: [Double?]) throws -> Int {
+        let context = try #require(CGContext(data: nil, width: 1600, height: 1200, bitsPerComponent: 8, bytesPerRow: 6400, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        CartographicRenderer.drawRelief(width: 3, height: 3, meters: meters, widthMeters: 1600, heightMeters: 1200, in: context)
+        let bytes = try #require(context.data).assumingMemoryBound(to: UInt8.self)
+        return (0..<(1600 * 1200)).filter { bytes[$0 * 4 + 3] > 0 }.count
+    }
+    #expect(try shadedPixels(Array(repeating: nil, count: 9)) == 0)
+    #expect(try shadedPixels(Array(repeating: 100, count: 9)) == 0)
+    #expect(try shadedPixels([0,300,600,0,300,600,0,300,600]) > 0)
 }

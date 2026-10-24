@@ -353,7 +353,7 @@ public struct TerrainLayout: Codable, Hashable, Sendable {
 }
 
 public struct RoadProject: Identifiable, Codable, Hashable, Sendable {
-    public static let currentFormatVersion = 10
+    public static let currentFormatVersion = 11
 
     public let id: UUID
     public var formatVersion: Int
@@ -372,6 +372,7 @@ public struct RoadProject: Identifiable, Codable, Hashable, Sendable {
     public var layerVisibility: MapLayerVisibility
     public var mapScale: MapScale
     public var groupID: UUID?
+    public var realWorldMap: RealWorldMap?
 
     public init(
         id: UUID = UUID(),
@@ -390,7 +391,8 @@ public struct RoadProject: Identifiable, Codable, Hashable, Sendable {
         showsGrid: Bool = true,
         layerVisibility: MapLayerVisibility = .init(),
         mapScale: MapScale = .standard,
-        groupID: UUID? = nil
+        groupID: UUID? = nil,
+        realWorldMap: RealWorldMap? = nil
     ) {
         self.id = id
         self.formatVersion = Self.currentFormatVersion
@@ -412,6 +414,7 @@ public struct RoadProject: Identifiable, Codable, Hashable, Sendable {
         self.layerVisibility = layerVisibility
         self.mapScale = mapScale
         self.groupID = groupID
+        self.realWorldMap = realWorldMap
     }
 
     public var roads: [RoadSegment] {
@@ -429,7 +432,7 @@ public struct RoadProject: Identifiable, Codable, Hashable, Sendable {
         case roadNetwork, interchanges, trafficRules
         case structureReviews, engineeringStructures
         case theme, showsContours, showsGrid
-        case layerVisibility, mapScale, groupID
+        case layerVisibility, mapScale, groupID, realWorldMap
     }
 
     public init(from decoder: Decoder) throws {
@@ -489,6 +492,7 @@ public struct RoadProject: Identifiable, Codable, Hashable, Sendable {
             forKey: .mapScale
         ) ?? .standard
         groupID = try values.decodeIfPresent(UUID.self, forKey: .groupID)
+        realWorldMap = try values.decodeIfPresent(RealWorldMap.self, forKey: .realWorldMap)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -511,5 +515,6 @@ public struct RoadProject: Identifiable, Codable, Hashable, Sendable {
         try values.encode(layerVisibility, forKey: .layerVisibility)
         try values.encode(mapScale, forKey: .mapScale)
         try values.encodeIfPresent(groupID, forKey: .groupID)
+        try values.encodeIfPresent(realWorldMap, forKey: .realWorldMap)
     }
 }

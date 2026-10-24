@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import PhoenixValleyCore
 
-@Test func projectV9DefaultsTrafficRulesAndV10RoundTripsThem() throws {
+@Test func projectV9DefaultsTrafficRulesAndCurrentVersionRoundTripsThem() throws {
     let sourceRoadID = trafficUUID(900)
     let rules = RoadTrafficRuleSet(
         sourceRules: [
@@ -35,7 +35,7 @@ import Testing
         JSONSerialization.jsonObject(with: encoded) as? [String: Any]
     )
 
-    #expect(decoded.formatVersion == 10)
+    #expect(decoded.formatVersion == RoadProject.currentFormatVersion)
     #expect(decoded.trafficRules == rules)
     #expect(object["trafficRules"] != nil)
 
