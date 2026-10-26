@@ -1627,11 +1627,27 @@ extension MapExporter {
             outputText(formattedScaleDistance(distance), at: CGPoint(x: 26, y: y-28), fontSize: 15, color: color, in: context)
         }
         if options.showsInformation {
-            let text = "\(Int(project.mapScale.widthMeters/1000)) × \(Int(project.mapScale.heightMeters/1000)) km · \(Set(project.roads.map(\.sourceRoadID)).count) 条道路"
+            let text = informationText(for: project, options: options)
             outputText(text, at: CGPoint(x: 26, y: options.showsTitle ? 72 : 32), fontSize: 15, color: color, in: context)
         }
         if let map = project.realWorldMap, options.showsAttribution || map.source == .osmXML {
             outputText(map.attribution, at: CGPoint(x: 26, y: size.height-23), fontSize: 12, color: color, in: context)
+        }
+    }
+
+    private static func informationText(for project: RoadProject, options: MapExportOptions) -> String {
+        let totalRoads = Set(project.roads.map(\.sourceRoadID)).count
+        if let v = options.viewport {
+            let metersPerPixel = project.mapScale.metersPerPoint / v.camera.scale
+            let widthMeters = v.width * metersPerPixel
+            let heightMeters = v.height * metersPerPixel
+            let widthStr = widthMeters >= 1000 ? "\(String(format: "%.1f", widthMeters / 1000)) km" : "\(Int(widthMeters.rounded())) m"
+            let heightStr = heightMeters >= 1000 ? "\(String(format: "%.1f", heightMeters / 1000)) km" : "\(Int(heightMeters.rounded())) m"
+            return "当前视野 \(widthStr) × \(heightStr) · 全图 \(totalRoads) 条道路"
+        } else {
+            let widthKm = Int((project.mapScale.widthMeters / 1000).rounded())
+            let heightKm = Int((project.mapScale.heightMeters / 1000).rounded())
+            return "\(widthKm) × \(heightKm) km · \(totalRoads) 条道路"
         }
     }
 
@@ -1660,7 +1676,8 @@ extension MapExporter {
         var labels: [String] = []
         if options.showsTitle { labels.append("<text x=\"26\" y=\"60\" font-size=\"28\">\(xmlEscaped(project.name))</text>") }
         if options.showsInformation {
-            labels.append("<text x=\"26\" y=\"\(options.showsTitle ? 88 : 48)\" font-size=\"15\">\(Int(project.mapScale.widthMeters/1000)) × \(Int(project.mapScale.heightMeters/1000)) km · \(Set(project.roads.map(\.sourceRoadID)).count) 条道路</text>")
+            let text = xmlEscaped(informationText(for: project, options: options))
+            labels.append("<text x=\"26\" y=\"\(options.showsTitle ? 88 : 48)\" font-size=\"15\">\(text)</text>")
         }
         if options.showsScale {
             let metersPerPixel = project.mapScale.metersPerPoint/(options.viewport?.camera.scale ?? 1)

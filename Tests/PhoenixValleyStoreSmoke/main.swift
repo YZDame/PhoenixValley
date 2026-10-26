@@ -142,6 +142,7 @@ func verifyPlayableInterchange() throws {
     try check(store.project.realWorldMap == nil && store.isEditingInterchange, "practice uses generated terrain and interchange tool")
     try check(store.selectedInterchangeCrossing != nil, "practice has selected grade-separated crossing")
     try check(store.prepareQuickRamp(), "quick ramp preview succeeds: \(store.pendingRampError ?? "")")
+    try check(!store.isPendingRampHandDrawn, "quick ramp is not hand drawn")
     let first = store.pendingRampPlan!.ramp
     try check(store.prepareQuickRamp(cycle: true), "can choose another connection side")
     try check(store.pendingRampPlan!.ramp.end.lastKnownPoint != first.end.lastKnownPoint, "cycling changes ramp terminal")
@@ -168,7 +169,20 @@ func verifyPlayableInterchange() throws {
     print("PASS practice, preview, side selection, commit, undo, redo and persistence")
 }
 
+@MainActor
+func verifyDefaultScale() throws {
+    let root = URL(fileURLWithPath: CommandLine.arguments[1]).appending(path: UUID().uuidString)
+    let manager = TemporaryFileManager(root: root)
+    let files = ProjectFileStore(fileManager: manager)
+    let store = RoadDocumentStore(fileStore: files)
+    try check(store.project.mapScale.metersPerPoint == 20, "first placeholder project uses 20 meters per point")
+    store.deleteCurrentProject()
+    try check(store.project.mapScale.metersPerPoint == 20, "recreated project uses 20 meters per point")
+    print("PASS default map scale consistency")
+}
+
 do {
+    try verifyDefaultScale()
     try verifyTransactions()
     try verifyInterchangeAndEraser()
     try verifyPlayableInterchange()

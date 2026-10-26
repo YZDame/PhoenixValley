@@ -2913,7 +2913,7 @@ final class RoadMapWorkspaceView: UIView, MKMapViewDelegate {
         accessibilityElements = usesAppleMap
             ? [map, canvas, nativeCompass, nativeScale] : [canvas, nativeCompass, nativeScale]
         let area = project.realWorldMap?.bounds ?? (try! GeoBounds.around(latitude: 0, longitude: 0,
-            widthMeters: 1600, heightMeters: 1200))
+            widthMeters: project.mapScale.widthMeters, heightMeters: project.mapScale.heightMeters))
         let targetScale = project.mapScale.metersPerPoint
         if displayedProjectID != project.id || geographicBounds != area || worldMetersPerPoint != targetScale {
             displayedProjectID = project.id
@@ -2936,12 +2936,21 @@ final class RoadMapWorkspaceView: UIView, MKMapViewDelegate {
         nativeScale.frame = CGRect(x: inset.left + 16, y: controlsY+54, width: 150, height: 36)
         if needsInitialRegion, bounds.width > 0, bounds.height > 0, let area = geographicBounds {
             needsInitialRegion = false
+            let center = CLLocationCoordinate2D(
+                latitude: (area.minLatitude + area.maxLatitude) / 2,
+                longitude: (area.minLongitude + area.maxLongitude) / 2
+            )
             let region = MKCoordinateRegion(
-                center: CLLocationCoordinate2D(latitude: (area.minLatitude + area.maxLatitude) / 2,
-                    longitude: (area.minLongitude + area.maxLongitude) / 2),
+                center: center,
                 latitudinalMeters: worldMetersPerPoint * 1200,
-                longitudinalMeters: worldMetersPerPoint * 1600)
-            map.cameraBoundary = MKMapView.CameraBoundary(coordinateRegion: region)
+                longitudinalMeters: worldMetersPerPoint * 1600
+            )
+            let boundaryRegion = MKCoordinateRegion(
+                center: center,
+                latitudinalMeters: worldMetersPerPoint * 1200 * 1.8,
+                longitudinalMeters: worldMetersPerPoint * 1600 * 1.8
+            )
+            map.cameraBoundary = MKMapView.CameraBoundary(coordinateRegion: boundaryRegion)
             map.cameraZoomRange = nil
             fittedCameraDistance = 0
             awaitsFittedCamera = true

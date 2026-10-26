@@ -39,6 +39,7 @@ final class RoadDocumentStore {
     private(set) var selectedRampID: UUID?
     private(set) var isAwaitingRampDrawing = false
     private(set) var pendingRampPlan: RoadRampPlan?
+    private(set) var isPendingRampHandDrawn = false
     private(set) var pendingRampError: String?
     var rampDirection: RoadDirection = .forward
     private var quickRampVariant = 0
@@ -86,7 +87,7 @@ final class RoadDocumentStore {
         } else {
             let terrain = Self.placeholderTerrain(seed: 20260722)
             let initialProject = RoadProject(name: "我的设计地图", terrain: terrain,
-                mapScale: MapScale(metersPerPoint: 62.5))
+                mapScale: MapScale(metersPerPoint: 20))
             project = initialProject
             projects = [initialProject]
             createdPlaceholder = true
@@ -315,12 +316,15 @@ final class RoadDocumentStore {
         }
         if selectedKind == .railway { selectedKind = .arterial }
         beginRampDrawing()
-        return prepareRampDraft(points)
+        let success = prepareRampDraft(points)
+        if success { isPendingRampHandDrawn = false }
+        return success
     }
 
     func beginRampDrawing() {
         pendingRampPlan = nil
         pendingRampError = nil
+        isPendingRampHandDrawn = false
         guard selectedInterchangeCrossing != nil else {
             isAwaitingRampDrawing = false
             pendingRampError = "请先选择一个上下分离交叉口。"
@@ -339,6 +343,7 @@ final class RoadDocumentStore {
     func prepareRampDraft(_ rawPoints: [RoadPoint]) -> Bool {
         pendingRampPlan = nil
         pendingRampError = nil
+        isPendingRampHandDrawn = true
         guard isAwaitingRampDrawing,
               let crossing = selectedInterchangeCrossing
         else {
@@ -385,6 +390,7 @@ final class RoadDocumentStore {
     func cancelRampDraft() {
         isAwaitingRampDrawing = false
         pendingRampPlan = nil
+        isPendingRampHandDrawn = false
         pendingRampError = nil
     }
 
@@ -516,6 +522,7 @@ final class RoadDocumentStore {
         rampDirection = plan.ramp.direction
         isAwaitingRampDrawing = false
         pendingRampPlan = nil
+        isPendingRampHandDrawn = false
         pendingRampError = nil
         return true
     }
