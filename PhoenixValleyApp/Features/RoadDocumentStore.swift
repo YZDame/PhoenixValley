@@ -1313,7 +1313,7 @@ final class RoadDocumentStore {
                 project = RoadProject(
                     name: "新地图",
                     terrain: Self.placeholderTerrain(seed: seed),
-                    mapScale: MapScale(metersPerPoint: 20)
+                    mapScale: MapScale(metersPerPoint: 62.5)
                 )
                 projects = [project]
                 scheduleTerrainGeneration(
@@ -1814,7 +1814,7 @@ final class RoadDocumentStore {
             project = RoadProject(
                 name: name,
                 terrain: terrain,
-                mapScale: MapScale(metersPerPoint: 20),
+                mapScale: MapScale(metersPerPoint: 62.5),
                 groupID: groupID
             )
             projects.append(project)

@@ -86,7 +86,7 @@ private struct ProjectSidebar: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Menu("新建地图", systemImage: "doc.badge.plus") {
-                        Button("空白地图 · 32 × 24 千米", systemImage: "play.fill") {
+                        Button("空白地图 · 100 × 75 千米", systemImage: "play.fill") {
                             document.createNewMap()
                         }
                         Divider()

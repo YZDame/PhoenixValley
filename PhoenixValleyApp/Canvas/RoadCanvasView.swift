@@ -448,8 +448,8 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         if realWorldMap?.source != .appleMaps {
         context.setFillColor(
             (
-                showsTerrain && realWorldMap == nil && terrain.scenario.hasOceanBoundary
-                    ? palette.water
+                showsTerrain && realWorldMap == nil
+                    ? (terrain.scenario.hasOceanBoundary ? palette.water : palette.plain)
                     : UIColor.systemBackground
             ).cgColor
         )
@@ -1638,6 +1638,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
                 drawWatershedBoundaries(in: context, color: palette.watershed)
             }
             context.restoreGState()
+            drawTerrainEdgeFade(in: context, fadeColor: palette.plain)
             return
         }
 
@@ -1678,6 +1679,50 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         context.setLineWidth(1.2)
         context.addPath(shorePath)
         context.strokePath()
+        drawTerrainEdgeFade(in: context, fadeColor: palette.water)
+    }
+
+    private func drawTerrainEdgeFade(in context: CGContext, fadeColor: UIColor) {
+        let fadeWidth: CGFloat = 80
+        context.saveGState()
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        fadeColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        let edgeColor = CGColor(red: red, green: green, blue: blue, alpha: 0.95)
+        let clearColor = CGColor(red: red, green: green, blue: blue, alpha: 0.0)
+        guard let gradient = CGGradient(
+            colorsSpace: CGColorSpaceCreateDeviceRGB(),
+            colors: [edgeColor, clearColor] as CFArray,
+            locations: [0, 1]
+        ) else {
+            context.restoreGState()
+            return
+        }
+
+        // Top edge
+        context.saveGState()
+        context.clip(to: CGRect(x: 0, y: 0, width: 1600, height: fadeWidth))
+        context.drawLinearGradient(gradient, start: CGPoint(x: 800, y: 0), end: CGPoint(x: 800, y: fadeWidth), options: [])
+        context.restoreGState()
+
+        // Bottom edge
+        context.saveGState()
+        context.clip(to: CGRect(x: 0, y: 1200 - fadeWidth, width: 1600, height: fadeWidth))
+        context.drawLinearGradient(gradient, start: CGPoint(x: 800, y: 1200), end: CGPoint(x: 800, y: 1200 - fadeWidth), options: [])
+        context.restoreGState()
+
+        // Left edge
+        context.saveGState()
+        context.clip(to: CGRect(x: 0, y: 0, width: fadeWidth, height: 1200))
+        context.drawLinearGradient(gradient, start: CGPoint(x: 0, y: 600), end: CGPoint(x: fadeWidth, y: 600), options: [])
+        context.restoreGState()
+
+        // Right edge
+        context.saveGState()
+        context.clip(to: CGRect(x: 1600 - fadeWidth, y: 0, width: fadeWidth, height: 1200))
+        context.drawLinearGradient(gradient, start: CGPoint(x: 1600, y: 600), end: CGPoint(x: 1600 - fadeWidth, y: 600), options: [])
+        context.restoreGState()
+
+        context.restoreGState()
     }
 
     private func drawElevationBands(in context: CGContext, palette: TerrainPalette) {
@@ -1794,8 +1839,9 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
                     current = target
                 } while current != start
                 guard ring.count >= 3, current == start else { continue }
-                // Remove cell-scale stair steps before fitting quadratic curves.
-                for _ in 0..<(ring.count > 12 ? 5 : 1) {
+                // Remove cell-scale stair steps before fitting quadratic curves with multi-pass Laplacian smoothing.
+                let smoothingPasses = ring.count > 12 ? 10 : (ring.count > 5 ? 4 : 2)
+                for _ in 0..<smoothingPasses {
                     let previousRing = ring
                     for index in ring.indices {
                         let a = previousRing[(index + ring.count - 1) % ring.count]

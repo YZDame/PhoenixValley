@@ -104,8 +104,8 @@ public enum TerrainGenerator {
     public static func generate(
         seed: UInt64,
         vertexCount: Int = 96,
-        gridWidth: Int = 257,
-        gridHeight: Int = 193,
+        gridWidth: Int = 513,
+        gridHeight: Int = 385,
         scenario: TerrainScenario = .island
     ) -> TerrainLayout {
         let request = TerrainGenerationRequest(
@@ -621,7 +621,7 @@ public enum TerrainGenerator {
                 guard flow >= streamThreshold, elevations[centerIndex] > waterValue else { continue }
 
                 let order = sqrt(flow / streamThreshold)
-                let channelRadius = min(9.2, 2.4 + order * 1.55)
+                let channelRadius = min(11.5, 2.5 + order * 1.65)
                 if progress > 0.28, progress < 0.76, flow >= streamThreshold * 2.4 {
                     lakeCandidates.append(centerIndex)
                 }
@@ -645,8 +645,9 @@ public enum TerrainGenerator {
                         (Double(row) - sampleRow) * cellHeight
                     )
                     guard distance <= channelRadius else { continue }
-                    let bankAmount = min(1, distance / max(channelRadius, 0.1))
-                    let carved = Double(waterValue) * (0.965 + bankAmount * 0.028)
+                    let t = min(1, distance / max(channelRadius, 0.1))
+                    let bankAmount = t * t * (3 - 2 * t)
+                    let carved = Double(waterValue) * (0.958 + bankAmount * 0.035)
                     elevations[row * width + column] = min(
                         elevations[row * width + column],
                         UInt16(carved.rounded())
@@ -658,38 +659,68 @@ public enum TerrainGenerator {
         }
         }
 
-        let lakeCount = 3 + Int(generator.next() % 3)
-        for lakeIndex in 0..<min(lakeCount, lakeCandidates.count) {
-            let slot = min(
-                lakeCandidates.count - 1,
-                (lakeIndex * lakeCandidates.count / lakeCount)
-                    + Int(generator.next() % UInt64(max(1, lakeCandidates.count / lakeCount)))
+        // Lakes pool in low-lying valleys and depressions, strictly avoiding mountain summits and ridges.
+        let lowCandidates: [Int]
+        if !lakeCandidates.isEmpty {
+            let sortedByElevation = lakeCandidates.sorted { elevations[$0] < elevations[$1] }
+            let cutoffIndex = max(1, Int(ceil(Double(sortedByElevation.count) * 0.45)))
+            let lowCutoff = sortedByElevation[cutoffIndex - 1]
+            let maxAllowedElevation = max(
+                elevations[lowCutoff],
+                UInt16(min(0.95, (waterLevel + 0.15)) * Double(UInt16.max))
             )
-            let centerIndex = lakeCandidates[slot]
+            lowCandidates = lakeCandidates.filter { elevations[$0] <= maxAllowedElevation }
+        } else {
+            lowCandidates = []
+        }
+        let pool = lowCandidates.isEmpty ? lakeCandidates : lowCandidates
+
+        let lakeCount = 3 + Int(generator.next() % 3)
+        for lakeIndex in 0..<min(lakeCount, pool.count) {
+            let slot = min(
+                pool.count - 1,
+                (lakeIndex * pool.count / lakeCount)
+                    + Int(generator.next() % UInt64(max(1, pool.count / lakeCount)))
+            )
+            let centerIndex = pool[slot]
             let center = (column: centerIndex % width, row: centerIndex / width)
-            let radiusX = 24 + generator.nextUnit() * 42
-            let radiusY = 18 + generator.nextUnit() * 30
+            let radiusX = 26 + generator.nextUnit() * 44
+            let radiusY = 20 + generator.nextUnit() * 32
             let columnRadius = max(1, Int(ceil(radiusX / cellWidth)))
             let rowRadius = max(1, Int(ceil(radiusY / cellHeight)))
+            let lakeSeed = seed &+ UInt64(lakeIndex + 1) &* 0x9E3779B97F4A7C15
+            let lakeRotation = generator.nextUnit() * Double.pi * 2
 
             for rowOffset in -rowRadius...rowRadius {
                 for columnOffset in -columnRadius...columnRadius {
                     let column = center.column + columnOffset
                     let row = center.row + rowOffset
                     guard column >= 0, column < width, row >= 0, row < height else { continue }
+                    let offsetX = Double(columnOffset) * cellWidth
+                    let offsetY = Double(rowOffset) * cellHeight
                     let normalizedDistance = hypot(
-                        Double(columnOffset) * cellWidth / radiusX,
-                        Double(rowOffset) * cellHeight / radiusY
+                        offsetX / radiusX,
+                        offsetY / radiusY
                     )
-                    let edgeVariation = 0.88 + hashNoise(
-                        x: column,
-                        y: row,
-                        seed: seed &+ UInt64(lakeIndex + 1) &* 0x9E3779B97F4A7C15
-                    ) * 0.18
+                    // Continuous organic multi-octave perturbation prevents pixelated sawtooth edges
+                    let angle = atan2(offsetY, offsetX)
+                    let wx = Double(column) * cellWidth
+                    let wy = Double(row) * cellHeight
+                    let organicNoise = fractalNoise(
+                        x: wx,
+                        y: wy,
+                        frequency: 0.015,
+                        octaves: 3,
+                        seed: lakeSeed
+                    ) * 0.28
+                    let lobe = 0.12 * sin(angle * 2 + lakeRotation) + 0.06 * cos(angle * 3 - lakeRotation)
+                    let edgeVariation = 0.82 + organicNoise + lobe
                     guard normalizedDistance <= edgeVariation else { continue }
+                    let bank = min(1, normalizedDistance / edgeVariation)
+                    let carved = Double(waterValue) * (0.952 + bank * 0.038)
                     elevations[row * width + column] = min(
                         elevations[row * width + column],
-                        UInt16(Double(waterValue) * 0.955)
+                        UInt16(carved.rounded())
                     )
                     surfaceCodes[row * width + column] = HydrologySurface.lake.rawValue
                 }
