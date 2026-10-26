@@ -63,12 +63,12 @@ public enum MapTheme: String, Codable, CaseIterable, Identifiable, Sendable {
 
     public var displayName: String {
         switch self {
-        case .topographic: "地形"
-        case .planning: "规划"
-        case .ink: "墨线"
-        case .coastal: "海岸蓝"
-        case .midnight: "午夜"
-        case .forest: "森林"
+        case .topographic: "雾岚地形"
+        case .planning: "绢纸规划"
+        case .ink: "石墨线稿"
+        case .coastal: "浅湾海岸"
+        case .midnight: "深蓝夜色"
+        case .forest: "鼠尾草林野"
         }
     }
 }
@@ -129,7 +129,7 @@ public struct MapScale: Codable, Hashable, Sendable {
     public var metersPerPoint: Double
 
     public init(metersPerPoint: Double = 1) {
-        self.metersPerPoint = min(10, max(0.1, metersPerPoint))
+        self.metersPerPoint = min(100, max(0.1, metersPerPoint))
     }
 
     public var widthMeters: Double {
@@ -274,7 +274,7 @@ public enum TerrainScenario: String, CaseIterable, Codable, Hashable, Identifiab
 }
 
 public struct TerrainLayout: Codable, Hashable, Sendable {
-    public static let currentGenerationVersion = 7
+    public static let currentGenerationVersion = 8
 
     public var seed: UInt64
     public var shoreline: [RoadPoint]
@@ -353,7 +353,7 @@ public struct TerrainLayout: Codable, Hashable, Sendable {
 }
 
 public struct RoadProject: Identifiable, Codable, Hashable, Sendable {
-    public static let currentFormatVersion = 11
+    public static let currentFormatVersion = 13
 
     public let id: UUID
     public var formatVersion: Int

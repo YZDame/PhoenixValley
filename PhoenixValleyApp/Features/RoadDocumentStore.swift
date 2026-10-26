@@ -41,6 +41,7 @@ final class RoadDocumentStore {
     private(set) var pendingRampPlan: RoadRampPlan?
     private(set) var pendingRampError: String?
     var rampDirection: RoadDirection = .forward
+    private var quickRampVariant = 0
     var correctionStrength = 0.6
     private(set) var saveErrorMessage: String?
     private(set) var terrainGenerationState: TerrainGenerationState = .idle
@@ -83,11 +84,9 @@ final class RoadDocumentStore {
             project = saved
             createdPlaceholder = false
         } else {
-            let seed: UInt64 = 20260722
-            let initialProject = RoadProject(
-                name: "我的第一座城市",
-                terrain: Self.placeholderTerrain(seed: seed)
-            )
+            let terrain = Self.placeholderTerrain(seed: 20260722)
+            let initialProject = RoadProject(name: "我的设计地图", terrain: terrain,
+                mapScale: MapScale(metersPerPoint: 20))
             project = initialProject
             projects = [initialProject]
             createdPlaceholder = true
@@ -98,8 +97,7 @@ final class RoadDocumentStore {
             where original.formatVersion != upgraded.formatVersion {
                 try fileStore.save(upgraded)
             }
-            if !createdPlaceholder,
-               libraryLoadSucceeded,
+            if libraryLoadSucceeded,
                loadResult.projects.isEmpty,
                loadResult.diagnostics.isEmpty {
                 try fileStore.save(project)
@@ -118,6 +116,7 @@ final class RoadDocumentStore {
         }
 
         let shouldMaterializePlaceholder = createdPlaceholder
+            && project.realWorldMap == nil
             && libraryLoadSucceeded
             && loadResult.diagnostics.isEmpty
         let shouldRegenerateLoadedTerrain = !createdPlaceholder
@@ -261,6 +260,66 @@ final class RoadDocumentStore {
 
     func selectInterchangeCrossing(_ relation: RoadRelation?) {
         selectInterchangeCrossing(id: relation?.id)
+    }
+
+    func createInterchangePracticeMap() {
+        var practice = RoadProject(name: "立交练习场", terrain: TerrainLayout(seed: 0, shoreline: [],
+            gridWidth: 2, gridHeight: 2, elevations: [32768, 32768, 32768, 32768], scenario: .continent))
+        practice.roads = [
+            RoadSegment(kind: .motorway, level: .elevated, structure: .elevated,
+                points: [.init(x: 200, y: 600), .init(x: 1400, y: 600)]),
+            RoadSegment(kind: .arterial, points: [.init(x: 800, y: 100), .init(x: 800, y: 1100)]),
+        ]
+        guard importProject(practice) else { return }
+        activateInterchange()
+        selectInterchangeCrossing(id: project.roadNetwork.relations.first {
+            $0.kind == .gradeSeparatedCrossing && $0.secondaryPoint == nil
+        }?.id)
+    }
+
+    /// Builds a tangent quarter-turn from the selected hosts, using the same
+    /// planner and commit validation as a hand-drawn ramp.
+    @discardableResult
+    func prepareQuickRamp(cycle: Bool = false) -> Bool {
+        guard let crossing = selectedInterchangeCrossing else { return false }
+        if cycle { quickRampVariant = (quickRampVariant + 1) % 4 }
+        else { quickRampVariant = 0 }
+        let center = crossing.point
+        func terminal(sourceID: UUID, sign: Double) -> RoadPoint? {
+            let hosts = project.roads.filter { $0.sourceRoadID == sourceID }
+            let segments = hosts.flatMap { road in Array(zip(road.points, road.points.dropFirst())) }
+            guard let segment = segments.min(by: { a, b in
+                func distance(_ edge: (RoadPoint, RoadPoint)) -> Double {
+                    let dx = edge.1.x-edge.0.x, dy = edge.1.y-edge.0.y
+                    let lengthSquared = dx*dx+dy*dy
+                    let t = lengthSquared > 0 ? min(1, max(0,
+                        ((center.x-edge.0.x)*dx+(center.y-edge.0.y)*dy)/lengthSquared)) : 0
+                    return center.distance(to: .init(x: edge.0.x+t*dx, y: edge.0.y+t*dy))
+                }
+                return distance(a) < distance(b)
+            }) else { return nil }
+            let dx = segment.1.x-segment.0.x, dy = segment.1.y-segment.0.y
+            let length = hypot(dx, dy)
+            guard length > 0 else { return nil }
+            let reach = project.mapScale.canvasDistance(forMeters: 180)
+            return RoadSourceGeometry.nearestSource(toCanvasPoint:
+                .init(x: center.x+sign*reach*dx/length, y: center.y+sign*reach*dy/length),
+                maximumDistanceMeters: 200, mapScale: project.mapScale, in: hosts)?.nearestCanvasPoint
+        }
+        guard let start = terminal(sourceID: crossing.firstRoadID, sign: quickRampVariant < 2 ? -1 : 1),
+              let end = terminal(sourceID: crossing.secondRoadID, sign: quickRampVariant % 2 == 0 ? -1 : 1)
+        else {
+            pendingRampError = "主线长度不足，请手绘匝道或延长主线。"
+            return false
+        }
+        let points = (0...32).map { index -> RoadPoint in
+            let t = Double(index)/32, u = 1-t
+            return .init(x: u*u*start.x+2*u*t*center.x+t*t*end.x,
+                         y: u*u*start.y+2*u*t*center.y+t*t*end.y)
+        }
+        if selectedKind == .railway { selectedKind = .arterial }
+        beginRampDrawing()
+        return prepareRampDraft(points)
     }
 
     func beginRampDrawing() {
@@ -755,10 +814,41 @@ final class RoadDocumentStore {
             interchanges: project.interchanges
         )
         guard !result.affectedSourceRoadIDs.isEmpty else { return }
+        commitRoadRemoval(
+            result.network,
+            affectedSourceRoadIDs: result.affectedSourceRoadIDs,
+            errorPrefix: "无法擦除道路：会破坏立交连接"
+        )
+    }
+
+    @discardableResult
+    func deleteSelectedRoads() -> Bool {
+        let sourceRoadIDs = selectedSourceRoadIDs.intersection(
+            Set(project.roads.map(\.sourceRoadID))
+        )
+        guard !sourceRoadIDs.isEmpty else { return false }
+        let result = RoadNetwork.removing(
+            sourceRoadIDs: sourceRoadIDs,
+            from: project.roads,
+            interchanges: project.interchanges
+        )
+        return commitRoadRemoval(
+            result.network,
+            affectedSourceRoadIDs: sourceRoadIDs,
+            errorPrefix: "无法拆除所选道路：会破坏立交连接"
+        )
+    }
+
+    @discardableResult
+    private func commitRoadRemoval(
+        _ network: RoadNetwork,
+        affectedSourceRoadIDs: Set<UUID>,
+        errorPrefix: String
+    ) -> Bool {
         let existingRampSourceRoadIDs = Set(
             project.interchanges.flatMap(\.ramps).map(\.sourceRoadID)
         )
-        let erasedRampSourceRoadIDs = result.affectedSourceRoadIDs
+        let erasedRampSourceRoadIDs = affectedSourceRoadIDs
             .intersection(existingRampSourceRoadIDs)
 
         var candidate = project
@@ -770,7 +860,7 @@ final class RoadDocumentStore {
             }
             candidate.interchanges.removeAll { $0.ramps.isEmpty }
         }
-        let finalRoads = result.network.roadSegments.filter {
+        let finalRoads = network.roadSegments.filter {
             !erasedRampSourceRoadIDs.contains($0.sourceRoadID)
         }
         candidate.roadNetwork = RoadNetwork.rebuilding(
@@ -779,12 +869,12 @@ final class RoadDocumentStore {
         ).network
         guard validateInterchanges(
             in: candidate,
-            prefix: "无法擦除道路：会破坏立交连接"
-        ) else { return }
+            prefix: errorPrefix
+        ) else { return false }
 
         let rebuiltStructures = Self.engineeringStructures(
             for: candidate.roads.filter {
-                result.affectedSourceRoadIDs.contains($0.sourceRoadID)
+                affectedSourceRoadIDs.contains($0.sourceRoadID)
             },
             terrain: project.terrain,
             mapScale: project.mapScale
@@ -792,20 +882,21 @@ final class RoadDocumentStore {
         candidate.structureReviews.removeAll {
             Self.review(
                 $0,
-                dependsOnAny: result.affectedSourceRoadIDs
+                dependsOnAny: affectedSourceRoadIDs
             )
         }
         candidate.engineeringStructures.removeAll {
-            result.affectedSourceRoadIDs.contains($0.sourceRoadID)
+            affectedSourceRoadIDs.contains($0.sourceRoadID)
         }
         candidate.engineeringStructures.append(contentsOf: rebuiltStructures)
         candidate.updatedAt = .now
-        guard commitPersistedCandidate(candidate) else { return }
+        guard commitPersistedCandidate(candidate) else { return false }
         if let selectedRampID,
            erasedRampSourceRoadIDs.contains(selectedRampID) {
             self.selectedRampID = nil
         }
         sanitizeRoadSelection()
+        return true
     }
 
     @discardableResult
@@ -1117,6 +1208,11 @@ final class RoadDocumentStore {
     @discardableResult
     func importRealWorldProject(_ importedProject: RoadProject) -> Bool {
         guard importedProject.realWorldMap != nil else { return false }
+        return importProject(importedProject)
+    }
+
+    @discardableResult
+    private func importProject(_ importedProject: RoadProject) -> Bool {
         var candidate = importedProject
         candidate.groupID = project.groupID
         candidate.updatedAt = .now
@@ -1138,9 +1234,7 @@ final class RoadDocumentStore {
     func createNewMap(scenario: TerrainScenario? = nil) {
         let seed = UInt64.random(in: 1...UInt64.max)
         let number = projects.count + 1
-        let selectedScenario = scenario
-            ?? TerrainScenario.allCases.randomElement()
-            ?? .continent
+        let selectedScenario = scenario ?? .continent
         scheduleTerrainGeneration(
             seed: seed,
             scenario: selectedScenario,
@@ -1203,7 +1297,8 @@ final class RoadDocumentStore {
             showsGrid: project.showsGrid,
             layerVisibility: project.layerVisibility,
             mapScale: project.mapScale,
-            groupID: project.groupID
+            groupID: project.groupID,
+            realWorldMap: project.realWorldMap
         )
         project = copy
         projects.append(copy)
@@ -1225,7 +1320,8 @@ final class RoadDocumentStore {
                 let seed = UInt64.random(in: 1...UInt64.max)
                 project = RoadProject(
                     name: "新地图",
-                    terrain: Self.placeholderTerrain(seed: seed)
+                    terrain: Self.placeholderTerrain(seed: seed),
+                    mapScale: MapScale(metersPerPoint: 20)
                 )
                 projects = [project]
                 scheduleTerrainGeneration(
@@ -1539,10 +1635,10 @@ final class RoadDocumentStore {
     }
 
     private func applyProjectEdit(_ edit: (inout RoadProject) -> Void) {
-        checkpointForUndo()
-        edit(&project)
-        project.updatedAt = .now
-        persist()
+        var candidate = project
+        edit(&candidate)
+        candidate.updatedAt = .now
+        _ = commitPersistedCandidate(candidate)
     }
 
     private func resetHistory() {
@@ -1620,7 +1716,7 @@ final class RoadDocumentStore {
             case 9:
                 copy.trafficRules = .init()
                 copy.formatVersion = 10
-            case 10:
+            case 10, 11, 12:
                 copy.formatVersion = RoadProject.currentFormatVersion
             default:
                 return copy
@@ -1726,6 +1822,7 @@ final class RoadDocumentStore {
             project = RoadProject(
                 name: name,
                 terrain: terrain,
+                mapScale: MapScale(metersPerPoint: 20),
                 groupID: groupID
             )
             projects.append(project)

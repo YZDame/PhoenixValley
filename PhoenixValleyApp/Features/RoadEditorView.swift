@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 
 struct RoadEditorView: View {
     @Bindable var document: RoadDocumentStore
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var columnVisibility: NavigationSplitViewVisibility = .detailOnly
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -86,7 +86,7 @@ private struct ProjectSidebar: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Menu("新建地图", systemImage: "doc.badge.plus") {
-                        Button("随机场景", systemImage: "dice") {
+                        Button("空白地图 · 32 × 24 千米", systemImage: "play.fill") {
                             document.createNewMap()
                         }
                         Divider()
@@ -443,19 +443,21 @@ private struct ProjectRow: View {
 private struct RoadCanvasWorkspace: View {
     @Bindable var document: RoadDocumentStore
     @State private var isPaletteExpanded = true
+    @AppStorage("fingerDrawingEnabled") private var fingerDrawingEnabled = true
     @State private var showsMapAppearance = false
     @AppStorage("showsConstructionIssueOverlayV2")
     private var showsConstructionIssueOverlay = false
     @AppStorage("enablesAdvancedEngineeringAnalysis")
     private var enablesAdvancedEngineeringAnalysis = false
-    @State private var preparedExport: PreparedMapExport?
-    @State private var isPresentingExporter = false
-    @State private var isPreparingExport = false
-    @State private var exportErrorMessage: String?
+    @State private var exportSession: MapExportSession?
+    @State private var viewportReference = MapViewportReference()
 
     var body: some View {
         RoadCanvasRepresentable(
             project: document.project,
+            onViewportChanged: { viewportReference.value = $0 },
+            allowsFingerDrawing: fingerDrawingEnabled,
+            pendingRampPlan: document.pendingRampPlan,
             pendingStructureReview: enablesAdvancedEngineeringAnalysis
                 ? document.pendingStructureReview
                 : nil,
@@ -535,22 +537,14 @@ private struct RoadCanvasWorkspace: View {
             .padding(.bottom, 10)
         }
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button("新建设计", systemImage: "plus") { document.createNewMap() }
+                    .accessibilityIdentifier("new-design-map")
+            }
             ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    ForEach(MapExportFormat.allCases) { format in
-                        Button(format.displayName, systemImage: format.symbol) {
-                            prepareExport(format)
-                        }
-                        .accessibilityIdentifier("export-map-\(format.rawValue)")
-                    }
-                } label: {
-                    if isPreparingExport {
-                        ProgressView()
-                    } else {
-                        Label("导出地图", systemImage: "square.and.arrow.up")
-                    }
+                Button("导出地图", systemImage: "square.and.arrow.up") {
+                    exportSession = MapExportSession(viewport: viewportReference.value)
                 }
-                .disabled(isPreparingExport)
                 .accessibilityIdentifier("export-map-menu")
             }
 
@@ -587,23 +581,8 @@ private struct RoadCanvasWorkspace: View {
                 .presentationDragIndicator(.visible)
                 .interactiveDismissDisabled()
         }
-        .fileExporter(
-            isPresented: $isPresentingExporter,
-            document: preparedExport?.document,
-            contentType: preparedExport?.format.contentType ?? .data,
-            defaultFilename: preparedExport?.filename ?? "PhoenixValley",
-            onCompletion: finishExport
-        )
-        .alert(
-            "导出失败",
-            isPresented: Binding(
-                get: { exportErrorMessage != nil },
-                set: { if !$0 { exportErrorMessage = nil } }
-            )
-        ) {
-            Button("好", role: .cancel) { exportErrorMessage = nil }
-        } message: {
-            Text(exportErrorMessage ?? "未知错误")
+        .sheet(item: $exportSession) { session in
+            MapExportSheet(document: document, viewport: session.viewport)
         }
     }
 
@@ -639,54 +618,16 @@ private struct RoadCanvasWorkspace: View {
         )
     }
 
-    private func prepareExport(_ format: MapExportFormat) {
-        let project = document.project
-        isPreparingExport = true
-
-        Task { @MainActor in
-            do {
-                let data = try await Task.detached(priority: .userInitiated) {
-                    try MapExporter.data(for: project, format: format)
-                }.value
-                preparedExport = PreparedMapExport(
-                    format: format,
-                    document: MapExportDocument(data: data),
-                    filename: "\(project.name.sanitizedExportFilename).\(format.filenameExtension)"
-                )
-                isPreparingExport = false
-                // Let SwiftUI rebuild the exporter with the prepared content type
-                // before asking it to present the system document picker.
-                try? await Task.sleep(for: .milliseconds(100))
-                guard preparedExport?.format == format else { return }
-                isPresentingExporter = true
-            } catch {
-                isPreparingExport = false
-                exportErrorMessage = error.localizedDescription
-            }
-        }
-    }
-
-    private func finishExport(_ result: Result<URL, Error>) {
-        if case let .failure(error) = result {
-            let cocoaError = error as NSError
-            if cocoaError.domain != NSCocoaErrorDomain ||
-                cocoaError.code != NSUserCancelledError {
-                exportErrorMessage = error.localizedDescription
-            }
-        }
-        isPresentingExporter = false
-        preparedExport = nil
-    }
 }
 
-private struct PreparedMapExport: Identifiable {
+struct PreparedMapExport: Identifiable {
     let id = UUID()
     let format: MapExportFormat
     let document: MapExportDocument
     let filename: String
 }
 
-private struct MapExportDocument: FileDocument {
+struct MapExportDocument: FileDocument {
     static var readableContentTypes: [UTType] {
         [.png, .pdf, .svg, MapExportFormat.geoJSON.contentType]
     }
@@ -706,7 +647,7 @@ private struct MapExportDocument: FileDocument {
     }
 }
 
-private extension MapExportFormat {
+extension MapExportFormat {
     var displayName: String {
         switch self {
         case .png: "PNG 图像"
@@ -735,7 +676,7 @@ private extension MapExportFormat {
     }
 }
 
-private extension String {
+extension String {
     var sanitizedExportFilename: String {
         let forbidden = CharacterSet(charactersIn: "/:\\?%*|\"<>")
         let components = components(separatedBy: forbidden)
@@ -1138,19 +1079,7 @@ private struct MapAppearancePopover: View {
                 Text("地图外观")
                     .font(.headline)
 
-                LazyVGrid(
-                    columns: Array(repeating: GridItem(.flexible()), count: 3),
-                    spacing: 12
-                ) {
-                    ForEach(MapTheme.allCases) { theme in
-                        ThemeOptionButton(
-                            theme: theme,
-                            isSelected: document.project.theme == theme
-                        ) {
-                            document.setTheme(theme)
-                        }
-                    }
-                }
+                ThemePicker(selection: Binding(get: { document.project.theme }, set: { document.setTheme($0) }))
 
                 Divider()
 
@@ -1324,7 +1253,7 @@ private struct MapAppearancePopover: View {
                 Divider()
 
                 Menu {
-                    Button("随机场景", systemImage: "dice") {
+                    Button("空白地图 · 32 × 24 千米", systemImage: "play.fill") {
                         document.createNewMap()
                     }
                     Divider()
@@ -1439,6 +1368,8 @@ private enum MapScalePreset: Double, CaseIterable, Identifiable {
     case standard = 1
     case regional = 2
     case wide = 5
+    case world = 20
+    case largeWorld = 40
 
     var id: Double { rawValue }
 
@@ -1456,43 +1387,6 @@ private enum MapScalePreset: Double, CaseIterable, Identifiable {
             ) + " km"
         }
         return "\(Int(meters.rounded())) m"
-    }
-}
-
-private struct ThemeOptionButton: View {
-    let theme: MapTheme
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 7) {
-                RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .fill(theme.previewBackground)
-                    .frame(width: 92, height: 66)
-                    .overlay {
-                        Image(systemName: theme.previewSymbol)
-                            .font(.title2.weight(.medium))
-                            .foregroundStyle(.primary.opacity(0.72))
-                    }
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 13, style: .continuous)
-                            .stroke(
-                                isSelected
-                                    ? Color.accentColor
-                                    : Color.primary.opacity(0.12),
-                                lineWidth: isSelected ? 3 : 1
-                            )
-                    }
-
-                Text(theme.displayName)
-                    .font(.caption.weight(isSelected ? .semibold : .regular))
-                    .foregroundStyle(isSelected ? Color.accentColor : .primary)
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-        .accessibilityIdentifier("map-theme-\(theme.rawValue)")
     }
 }
 
@@ -1739,15 +1633,24 @@ private struct FloatingToolPalette: View {
 
     var body: some View {
         horizontalPalette
+            .frame(maxWidth: isExpanded ? 1060 : nil)
             .padding(8)
             .modifier(PaletteGlassSurface())
         .animation(.snappy(duration: 0.22), value: isExpanded)
         .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("floating-tool-palette")
     }
 
     private var horizontalPalette: some View {
         HStack(spacing: 8) {
-            paletteContent
+            if isExpanded {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    paletteContent.fixedSize(horizontal: true, vertical: false)
+                }
+                .scrollBounceBehavior(.basedOnSize)
+            } else {
+                paletteContent
+            }
             Divider().frame(height: 34)
             historyAndCollapseControls
         }
@@ -1765,33 +1668,16 @@ private struct FloatingToolPalette: View {
     }
 
     private var historyAndCollapseControls: some View {
-        HStack(spacing: 6) {
-            Button("撤销", systemImage: "arrow.uturn.backward") {
-                document.undo()
-            }
-            .labelStyle(.iconOnly)
-            .frame(width: 32, height: 38)
-            .disabled(!document.canUndo)
-            .accessibilityIdentifier("undo-button")
-
-            Button("重做", systemImage: "arrow.uturn.forward") {
-                document.redo()
-            }
-            .labelStyle(.iconOnly)
-            .frame(width: 32, height: 38)
-            .disabled(!document.canRedo)
-            .accessibilityIdentifier("redo-button")
-
+        HStack(spacing: 4) {
+            PaletteActionButton(title: "撤销", symbol: "arrow.uturn.backward", identifier: "undo-button", iconOnly: true) { document.undo() }
+                .frame(width: 44, height: 48).disabled(!document.canUndo)
+            PaletteActionButton(title: "重做", symbol: "arrow.uturn.forward", identifier: "redo-button", iconOnly: true) { document.redo() }
+                .frame(width: 44, height: 48).disabled(!document.canRedo)
             Divider().frame(height: 30)
-
-            Button {
-                isExpanded.toggle()
-            } label: {
-                Image(systemName: isExpanded ? "rectangle.compress.vertical" : "rectangle.expand.vertical")
-                    .frame(width: 32, height: 38)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(isExpanded ? "折叠工具栏" : "展开工具栏")
+            PaletteActionButton(title: isExpanded ? "折叠工具栏" : "展开工具栏",
+                symbol: isExpanded ? "rectangle.compress.vertical" : "rectangle.expand.vertical",
+                identifier: "palette-collapse", iconOnly: true) { isExpanded.toggle() }
+                .frame(width: 44, height: 48)
         }
     }
 
@@ -1801,7 +1687,7 @@ private struct PaletteGlassSurface: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 26, *) {
             content
-                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 20))
+                .glassEffect(.regular, in: .rect(cornerRadius: 20))
         } else {
             content
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -1842,6 +1728,7 @@ private struct CompactToolSummary: View {
 
 private struct ToolControls: View {
     @Bindable var document: RoadDocumentStore
+    @AppStorage("fingerDrawingEnabled") private var fingerDrawingEnabled = true
 
     var body: some View { horizontalControls }
 
@@ -1850,6 +1737,10 @@ private struct ToolControls: View {
             ForEach(RoadKind.allCases) { kind in
                 roadButton(kind)
             }
+            PaletteActionButton(title: fingerDrawingEnabled ? "手绘" : "浏览",
+                symbol: fingerDrawingEnabled ? "hand.draw" : "hand.point.up.left",
+                selected: fingerDrawingEnabled, identifier: "finger-drawing-toggle") { fingerDrawingEnabled.toggle() }
+                .frame(width: 62, height: 50)
             selectButton
             interchangeButton
             eraseButton
@@ -1875,12 +1766,9 @@ private struct ToolControls: View {
 
 
     private func roadButton(_ kind: RoadKind) -> some View {
-        RoadToolButton(
-            kind: kind,
-            isSelected: (document.activeTool == .draw
-                || document.isEditingInterchange)
-                && document.selectedKind == kind
-        ) {
+        PaletteActionButton(title: kind.displayName, symbol: kind == .railway ? "tram.fill" : "road.lanes",
+            selected: (document.activeTool == .draw || document.isEditingInterchange) && document.selectedKind == kind,
+            identifier: "road-tool-\(kind.rawValue)") {
             guard !(document.isEditingInterchange && kind == .railway) else {
                 return
             }
@@ -1899,72 +1787,30 @@ private struct ToolControls: View {
                 document.activateDrawing(kind: kind)
             }
         }
+        .frame(width: 62, height: 50)
         .disabled(document.isEditingInterchange && kind == .railway)
     }
 
     private var selectButton: some View {
-        Button {
-            document.activateSelection()
-        } label: {
-            ToolButtonLabel(
-                title: "选择",
-                symbol: "selection.pin.in.out"
-            )
-            .background(
-                document.isSelecting
-                    ? Color.accentColor.opacity(0.14)
-                    : .clear,
-                in: RoundedRectangle(cornerRadius: 13, style: .continuous)
-            )
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("road-selection-tool")
+        PaletteActionButton(title: "选择", symbol: "selection.pin.in.out", selected: document.isSelecting,
+            identifier: "road-selection-tool") { document.activateSelection() }
+            .frame(width: 62, height: 50)
     }
-
     private var interchangeButton: some View {
-        Button {
-            document.activateInterchange()
-        } label: {
-            ToolButtonLabel(
-                title: "立交",
-                symbol: "point.3.connected.trianglepath.dotted"
-            )
-            .background(
-                document.isEditingInterchange
-                    ? Color.accentColor.opacity(0.14)
-                    : .clear,
-                in: RoundedRectangle(cornerRadius: 13, style: .continuous)
-            )
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("road-interchange-tool")
+        PaletteActionButton(title: "立交", symbol: "point.3.connected.trianglepath.dotted", selected: document.isEditingInterchange,
+            identifier: "road-interchange-tool") { document.activateInterchange() }
+            .frame(width: 62, height: 50)
     }
-
     private var eraseButton: some View {
-        Button {
-            document.activateEraser()
-        } label: {
-            ToolButtonLabel(
-                title: "擦除",
-                symbol: "eraser.line.dashed"
-            )
-            .background(
-                document.isErasing ? Color.red.opacity(0.12) : .clear,
-                in: RoundedRectangle(cornerRadius: 13, style: .continuous)
-            )
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("erase-road-tool")
+        PaletteActionButton(title: "擦除", symbol: "eraser.line.dashed", selected: document.isErasing,
+            identifier: "erase-road-tool") { document.activateEraser() }
+            .frame(width: 62, height: 50)
     }
 
     private var eraserModePicker: some View {
-        Picker("擦除方式", selection: $document.eraserMode) {
-            ForEach(RoadEraseMode.allCases) { mode in
-                Text(mode.displayName).tag(mode)
-            }
-        }
-        .pickerStyle(.segmented)
-        .accessibilityIdentifier("eraser-mode-picker")
+        PaletteSegments(titles: RoadEraseMode.allCases.map(\.displayName), values: Array(RoadEraseMode.allCases),
+            selection: $document.eraserMode, label: "擦除方式", identifier: "eraser-mode-picker")
+            .frame(height: 36)
     }
 
     private var selectionSummary: some View {
@@ -1981,13 +1827,9 @@ private struct ToolControls: View {
             .lineLimit(1)
             Spacer(minLength: 0)
             if !document.selectedSourceRoadIDs.isEmpty {
-                Button {
-                    document.clearRoadSelection()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("清除道路选择")
+                PaletteActionButton(title: "清除道路选择", symbol: "xmark.circle.fill",
+                    identifier: "clear-road-selection", iconOnly: true) { document.clearRoadSelection() }
+                    .frame(width: 44, height: 44)
             }
         }
     }
@@ -2034,13 +1876,10 @@ private struct ToolControls: View {
     }
 
     private var levelPicker: some View {
-        Picker("道路层级", selection: $document.selectedLevel) {
-            Text("隧道").tag(RoadLevel.tunnel)
-            Text("地面").tag(RoadLevel.ground)
-            Text("高架").tag(RoadLevel.elevated)
-        }
-        .pickerStyle(.segmented)
-        .disabled(document.isErasing || document.isSelecting)
+        PaletteSegments(titles: ["隧道", "地面", "高架"], values: [RoadLevel.tunnel, .ground, .elevated],
+            selection: $document.selectedLevel, label: "道路层级", identifier: "road-level-picker")
+            .frame(height: 36)
+            .disabled(document.isErasing || document.isSelecting)
     }
 
     private var correctionSlider: some View {
@@ -2048,57 +1887,8 @@ private struct ToolControls: View {
             Text("修正 \(Int(document.correctionStrength * 100))%")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            Slider(value: $document.correctionStrength, in: 0...1)
-                .accessibilityLabel("笔迹修正强度")
+            PaletteSlider(value: $document.correctionStrength).frame(height: 32)
         }
-    }
-}
-
-private struct RoadToolButton: View {
-    let kind: RoadKind
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 5) {
-                RoadSwatch(kind: kind)
-                    .frame(height: ToolButtonLabel.iconLaneHeight)
-                Text(kind.displayName)
-                    .font(.caption2)
-            }
-            .frame(
-                width: ToolButtonLabel.width,
-                height: ToolButtonLabel.height
-            )
-            .background(
-                isSelected ? Color.accentColor.opacity(0.14) : .clear,
-                in: RoundedRectangle(cornerRadius: 13, style: .continuous)
-            )
-        }
-        .buttonStyle(.plain)
-        .contentShape(Rectangle())
-        .accessibilityIdentifier("road-tool-\(kind.rawValue)")
-    }
-}
-
-private struct ToolButtonLabel: View {
-    static let width: CGFloat = 62
-    static let height: CGFloat = 48
-    static let iconLaneHeight: CGFloat = 20
-
-    let title: String
-    let symbol: String
-
-    var body: some View {
-        VStack(spacing: 5) {
-            Image(systemName: symbol)
-                .font(.body.weight(.semibold))
-                .frame(height: Self.iconLaneHeight)
-            Text(title)
-                .font(.caption2)
-        }
-        .frame(width: Self.width, height: Self.height)
     }
 }
 
@@ -2222,115 +2012,11 @@ private extension MapTheme {
         }
     }
 
-    var previewBackground: Color {
-        switch self {
-        case .topographic: Color(red: 0.72, green: 0.82, blue: 0.59)
-        case .planning: Color(red: 0.91, green: 0.92, blue: 0.85)
-        case .ink: Color(white: 0.94)
-        case .coastal: Color(red: 0.49, green: 0.77, blue: 0.86)
-        case .midnight: Color(red: 0.08, green: 0.14, blue: 0.22)
-        case .forest: Color(red: 0.56, green: 0.7, blue: 0.49)
-        }
-    }
-
-    var previewForeground: Color {
-        switch self {
-        case .topographic: Color(red: 0.24, green: 0.34, blue: 0.22)
-        case .planning: Color(red: 0.28, green: 0.34, blue: 0.35)
-        case .ink: Color(white: 0.22)
-        case .coastal: Color(red: 0.12, green: 0.34, blue: 0.42)
-        case .midnight: Color(red: 0.7, green: 0.86, blue: 0.95)
-        case .forest: Color(red: 0.18, green: 0.3, blue: 0.18)
-        }
-    }
-
+    var previewBackground: Color { Color(cgColor: palette.plain.cgColor) }
+    var previewForeground: Color { Color(cgColor: palette.motorway.cgColor) }
     var thumbnailPalette: ThumbnailPalette {
-        switch self {
-        case .topographic:
-            ThumbnailPalette(
-                water: Color(red: 0.69, green: 0.84, blue: 0.9),
-                plain: Color(red: 0.82, green: 0.88, blue: 0.67),
-                lowland: Color(red: 0.67, green: 0.8, blue: 0.53),
-                hill: Color(red: 0.77, green: 0.69, blue: 0.47),
-                mountain: Color(red: 0.61, green: 0.5, blue: 0.37),
-                shoreline: Color(red: 0.23, green: 0.38, blue: 0.42),
-                roadCasing: Color(red: 0.18, green: 0.25, blue: 0.22),
-                motorway: .white,
-                arterial: Color(red: 0.96, green: 0.83, blue: 0.28),
-                street: Color(red: 0.86, green: 0.93, blue: 0.82),
-                railway: Color(red: 0.28, green: 0.2, blue: 0.16)
-            )
-        case .planning:
-            ThumbnailPalette(
-                water: Color(red: 0.86, green: 0.92, blue: 0.94),
-                plain: Color(red: 0.96, green: 0.95, blue: 0.89),
-                lowland: Color(red: 0.9, green: 0.91, blue: 0.8),
-                hill: Color(red: 0.87, green: 0.82, blue: 0.68),
-                mountain: Color(red: 0.76, green: 0.7, blue: 0.62),
-                shoreline: .black.opacity(0.3),
-                roadCasing: .white,
-                motorway: Color(red: 0.18, green: 0.2, blue: 0.21),
-                arterial: Color(red: 0.32, green: 0.36, blue: 0.37),
-                street: Color(red: 0.72, green: 0.75, blue: 0.73),
-                railway: Color(red: 0.35, green: 0.25, blue: 0.2)
-            )
-        case .ink:
-            ThumbnailPalette(
-                water: Color(white: 0.93),
-                plain: Color(white: 0.985),
-                lowland: Color(white: 0.955),
-                hill: Color(white: 0.92),
-                mountain: Color(white: 0.86),
-                shoreline: .black.opacity(0.35),
-                roadCasing: .white,
-                motorway: Color(white: 0.08),
-                arterial: Color(white: 0.2),
-                street: Color(white: 0.48),
-                railway: .black
-            )
-        case .coastal:
-            ThumbnailPalette(
-                water: Color(red: 0.49, green: 0.77, blue: 0.86),
-                plain: Color(red: 0.96, green: 0.91, blue: 0.76),
-                lowland: Color(red: 0.84, green: 0.87, blue: 0.67),
-                hill: Color(red: 0.78, green: 0.72, blue: 0.54),
-                mountain: Color(red: 0.57, green: 0.48, blue: 0.4),
-                shoreline: Color(red: 0.12, green: 0.34, blue: 0.42),
-                roadCasing: Color(red: 0.95, green: 0.92, blue: 0.78),
-                motorway: Color(red: 0.16, green: 0.3, blue: 0.36),
-                arterial: Color(red: 0.93, green: 0.52, blue: 0.22),
-                street: Color(red: 0.96, green: 0.88, blue: 0.62),
-                railway: Color(red: 0.35, green: 0.22, blue: 0.17)
-            )
-        case .midnight:
-            ThumbnailPalette(
-                water: Color(red: 0.05, green: 0.1, blue: 0.17),
-                plain: Color(red: 0.11, green: 0.16, blue: 0.2),
-                lowland: Color(red: 0.14, green: 0.22, blue: 0.23),
-                hill: Color(red: 0.2, green: 0.27, blue: 0.25),
-                mountain: Color(red: 0.3, green: 0.32, blue: 0.28),
-                shoreline: Color(red: 0.48, green: 0.7, blue: 0.78),
-                roadCasing: Color(red: 0.04, green: 0.08, blue: 0.13),
-                motorway: Color(red: 0.68, green: 0.84, blue: 0.95),
-                arterial: Color(red: 0.98, green: 0.7, blue: 0.31),
-                street: Color(red: 0.55, green: 0.72, blue: 0.72),
-                railway: Color(red: 0.78, green: 0.55, blue: 0.84)
-            )
-        case .forest:
-            ThumbnailPalette(
-                water: Color(red: 0.43, green: 0.68, blue: 0.69),
-                plain: Color(red: 0.78, green: 0.84, blue: 0.69),
-                lowland: Color(red: 0.58, green: 0.72, blue: 0.5),
-                hill: Color(red: 0.42, green: 0.58, blue: 0.38),
-                mountain: Color(red: 0.3, green: 0.4, blue: 0.31),
-                shoreline: Color(red: 0.12, green: 0.3, blue: 0.28),
-                roadCasing: Color(red: 0.7, green: 0.78, blue: 0.58),
-                motorway: Color(red: 0.23, green: 0.3, blue: 0.25),
-                arterial: Color(red: 0.77, green: 0.55, blue: 0.21),
-                street: Color(red: 0.87, green: 0.82, blue: 0.58),
-                railway: Color(red: 0.3, green: 0.19, blue: 0.14)
-            )
-        }
+        let p = palette
+        return ThumbnailPalette(water: Color(cgColor: p.water.cgColor), plain: Color(cgColor: p.plain.cgColor), lowland: Color(cgColor: p.lowland.cgColor), hill: Color(cgColor: p.hill.cgColor), mountain: Color(cgColor: p.mountain.cgColor), shoreline: Color(cgColor: p.shoreline.cgColor), roadCasing: Color(cgColor: p.roadCasing.cgColor), motorway: Color(cgColor: p.motorway.cgColor), arterial: Color(cgColor: p.arterial.cgColor), street: Color(cgColor: p.street.cgColor), railway: Color(cgColor: p.railway.cgColor))
     }
 }
 

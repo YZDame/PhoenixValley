@@ -51,6 +51,11 @@ struct RoadInterchangeInspector: View {
                     systemImage: "diamond"
                 )
                 .font(.subheadline.weight(.semibold))
+                Button("创建立交练习场", systemImage: "map") {
+                    document.createInterchangePracticeMap()
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("interchange-practice")
                 Text("先让两条公路在不同层级相交，例如地面道路与高架道路；再回到“立交”，轻点交叉处的青色菱形。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -63,7 +68,7 @@ struct RoadInterchangeInspector: View {
                     systemImage: "diamond"
                 )
                 .font(.subheadline.weight(.semibold))
-                Text("选中异层交叉后，点“添加匝道”，再从一条高亮主线画到另一条。")
+                Text("选中异层交叉后，可直接预览连接匝道，或从一条高亮主线手绘到另一条。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -97,10 +102,16 @@ struct RoadInterchangeInspector: View {
 
             directionPicker
 
+            Button("预览连接匝道", systemImage: "arrow.triangle.merge") {
+                document.prepareQuickRamp()
+            }
+            .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("interchange-quick-ramp")
+
             Button {
                 document.beginRampDrawing()
             } label: {
-                Label("添加匝道", systemImage: "pencil.and.scribble")
+                Label("手绘匝道", systemImage: "pencil.and.scribble")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
@@ -112,7 +123,7 @@ struct RoadInterchangeInspector: View {
         VStack(alignment: .leading, spacing: 10) {
             Label("从一条主线画向另一条主线", systemImage: "pencil.tip")
                 .font(.subheadline.weight(.semibold))
-            Text("首尾需要落在两条高亮主线上；绘制方向就是默认行驶方向。双指仍可平移和缩放。")
+            Text("用 Apple Pencil 绘制，或开启工具栏“手绘”后用手指画线。首尾分别落在两条高亮主线上；绘制方向就是默认行驶方向。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -148,6 +159,10 @@ struct RoadInterchangeInspector: View {
             .font(.caption)
 
             directionPicker
+            Button("切换连接侧", systemImage: "arrow.triangle.2.circlepath") {
+                document.prepareQuickRamp(cycle: true)
+            }
+            .accessibilityIdentifier("interchange-cycle-ramp")
 
             HStack {
                 Button("重画") {

@@ -20,16 +20,24 @@ The project is currently a local prototype, not an App Store release. It targets
 
 ![IMG_0916](https://pauline.oss-cn-shenzhen.aliyuncs.com/img/IMG_0916.PNG)
 
+## Pure Design Sandbox
+
+New maps start as an empty 32 × 24 km world with no prebuilt road network. Terrain, roads, bridges, tunnels, and ramps share one world-coordinate system, so zooming, rotating, resetting north, and reopening a save never detach roads from the terrain.
+
+The canvas uses MapKit's native camera, navigation gestures, compass, and scale control. A replacement overlay removes existing real-world roads from generated worlds. The palette works with both finger and Apple Pencil: enable Hand Drawing to sketch with a finger, or turn it off for one-finger navigation while Pencil remains available for drawing.
+
+The export panel previews the actual renderer and offers full-map or current-viewport output, four file formats, coordinated theme selection, and optional title, scale, extent/road count, and source attribution text.
+
 ## Experience
 
-- Draw motorway, arterial, street, and railway routes directly on the canvas.
-- Pan and zoom the terrain with touch while reserving Apple Pencil for road input.
+- Draw motorway, arterial, street, and railway routes with Apple Pencil or a finger.
+- Use every palette button, segmented control, and slider with either finger or Apple Pencil.
 - Work with ground roads, elevated roads, tunnels, bridges, ramps, and explicit interchanges.
 - Review terrain-aware bridge, tunnel, slope, water, and crossing recommendations before applying them.
 - Edit existing networks with selection, marquee selection, moving, road-type changes, undo, redo, and local erasing.
 - Organize a multi-map library with groups, previews, rename, duplicate, move, and delete actions.
-- Switch between map styles including terrain, planning, monochrome, coastal blue, midnight, and forest themes.
-- Export finished maps as PNG, PDF, SVG, or GeoJSON.
+- Choose from six refined themes: Misty Terrain, Silk Planning, Graphite Ink, Coastal Bay, Midnight Blue, and Sage Forest.
+- Export PNG, PDF, SVG, or GeoJSON from a live preview, choosing full-map or current-viewport output.
 
 ## iPadOS Design
 
@@ -82,4 +90,4 @@ swift test
 
 ## Status
 
-Phoenix Valley is under active development. The current prototype has a functioning drawing canvas, generated terrain, topology-aware road editing, bridge and tunnel recommendations, interchange editing, traffic rules, project persistence, exports, and privacy documentation. Remaining work includes physical iPad Pencil testing, richer terrain systems, Apple Pencil advanced gestures, custom styles, traffic simulation, and formal App Store release work.
+Phoenix Valley is under active development. The current prototype has a functioning drawing canvas, generated terrain, topology-aware road editing, bridge and tunnel recommendations, interchange editing, traffic rules, project persistence, exports, and privacy documentation. Remaining work includes physical iPad Pencil testing, richer terrain systems, Apple Pencil advanced gestures, custom styles, more complete road design tools, and formal App Store release work.

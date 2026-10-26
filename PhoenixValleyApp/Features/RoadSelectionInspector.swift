@@ -100,6 +100,15 @@ struct RoadSelectionInspector: View {
             .accessibilityLabel("修改已选道路通行状态")
             .accessibilityIdentifier("selected-road-access-menu")
 
+            Button(role: .destructive) {
+                document.deleteSelectedRoads()
+            } label: {
+                Label("拆除", systemImage: "trash")
+                    .font(.subheadline)
+            }
+            .accessibilityLabel("拆除已选道路")
+            .accessibilityIdentifier("delete-selected-roads-button")
+
             Button {
                 document.clearRoadSelection()
             } label: {

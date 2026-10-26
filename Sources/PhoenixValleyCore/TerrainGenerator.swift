@@ -257,6 +257,23 @@ public enum TerrainGenerator {
             }
         }
 
+        // Distributed mountain chains with short spurs leave passes between ranges.
+        // Domain-warped relief follows the terrain-from-noise approach described by
+        // Red Blob Games; implementation is local and deterministic.
+        let chainCount = request.scenario == .mountains ? 12 : 7
+        for index in 0..<chainCount {
+            let x = 180 + Double(index % 4) * 380 + (generator.nextUnit() - 0.5) * 220
+            var y = 180 + Double(index / 4) * 420 + generator.nextUnit() * 230
+            if request.scenario == .valley { y = index.isMultiple(of: 2) ? 190 : 1010 }
+            let position = RoadPoint(x: x, y: y)
+            let direction = primaryDirection + (generator.nextUnit() - 0.5) * 1.8
+            let height = request.scenario == .hills ? 0.10 : 0.14 + generator.nextUnit() * 0.13
+            ridges.append(makeRidge(center: position, direction: direction,
+                length: 240 + generator.nextUnit() * 390, bend: (generator.nextUnit() - 0.5) * 250,
+                width: 24 + generator.nextUnit() * 30,
+                height: height * (request.scenario.hasOceanBoundary ? 0.7 : 1)))
+        }
+
         var valleys: [Ridge] = []
         let valleyCount = 2 + Int(generator.next() % 3)
         for index in 0..<valleyCount {
@@ -410,25 +427,13 @@ public enum TerrainGenerator {
 
         try cancellationCheck?()
         progress?(TerrainGenerationProgress(phase: .hydrology, fractionCompleted: 0.9))
-        let hydrology: HydrologyLayout
-        if request.scenario == .riverAndLakes {
-            hydrology = carveDrainageNetwork(
-                into: &elevations,
-                width: width,
-                height: height,
-                waterLevel: 0.2,
-                seed: seed,
-                runsHorizontally: drainageRunsHorizontally,
-                reversed: drainageReversed
-            )
-        } else {
-            hydrology = classifyBaseHydrology(
-                elevations: elevations,
-                width: width,
-                height: height,
-                waterLevel: 0.2,
-                hasOceanBoundary: request.scenario.hasOceanBoundary
-            )
+        var hydrology = carveDrainageNetwork(
+            into: &elevations, width: width, height: height, waterLevel: 0.2,
+            seed: seed, runsHorizontally: drainageRunsHorizontally, reversed: drainageReversed)
+        if request.scenario.hasOceanBoundary {
+            for index in elevations.indices where elevations[index] == 0 {
+                hydrology.surfaceCodes[index] = HydrologySurface.ocean.rawValue
+            }
         }
         try cancellationCheck?()
         progress?(TerrainGenerationProgress(phase: .finished, fractionCompleted: 1))
@@ -605,7 +610,7 @@ public enum TerrainGenerator {
         // A full-canvas landmass contributes more drainage cells than the old
         // inset land polygon. Raise the threshold so rivers stay narrow instead
         // of turning the map edge into a broad wet band.
-        let streamThreshold = max(8, Double(cellCount) * 0.0122)
+        let streamThreshold = max(8, Double(cellCount) * 0.009)
         var lakeCandidates: [Int] = []
         for major in 1..<(majorCount - 1) {
             let progress = Double(major) / Double(max(1, majorCount - 1))
@@ -621,16 +626,23 @@ public enum TerrainGenerator {
                     lakeCandidates.append(centerIndex)
                 }
 
+            let downstream = receiver[centerIndex]
+            let downstreamColumn = downstream >= 0 ? downstream % width : center.column
+            let downstreamRow = downstream >= 0 ? downstream / width : center.row
+            for step in 0...4 {
+            let fraction = Double(step) / 4
+            let sampleColumn = Double(center.column) + Double(downstreamColumn - center.column) * fraction
+            let sampleRow = Double(center.row) + Double(downstreamRow - center.row) * fraction
             let columnRadius = max(1, Int(ceil(channelRadius / cellWidth)))
             let rowRadius = max(1, Int(ceil(channelRadius / cellHeight)))
             for rowOffset in -rowRadius...rowRadius {
                 for columnOffset in -columnRadius...columnRadius {
-                    let column = center.column + columnOffset
-                    let row = center.row + rowOffset
+                    let column = Int(sampleColumn.rounded()) + columnOffset
+                    let row = Int(sampleRow.rounded()) + rowOffset
                     guard column >= 0, column < width, row >= 0, row < height else { continue }
                     let distance = hypot(
-                        Double(columnOffset) * cellWidth,
-                        Double(rowOffset) * cellHeight
+                        (Double(column) - sampleColumn) * cellWidth,
+                        (Double(row) - sampleRow) * cellHeight
                     )
                     guard distance <= channelRadius else { continue }
                     let bankAmount = min(1, distance / max(channelRadius, 0.1))
@@ -644,8 +656,9 @@ public enum TerrainGenerator {
             }
             }
         }
+        }
 
-        let lakeCount = 1 + Int(generator.next() % 2)
+        let lakeCount = 3 + Int(generator.next() % 3)
         for lakeIndex in 0..<min(lakeCount, lakeCandidates.count) {
             let slot = min(
                 lakeCandidates.count - 1,
@@ -654,8 +667,8 @@ public enum TerrainGenerator {
             )
             let centerIndex = lakeCandidates[slot]
             let center = (column: centerIndex % width, row: centerIndex / width)
-            let radiusX = 18 + generator.nextUnit() * 24
-            let radiusY = 14 + generator.nextUnit() * 20
+            let radiusX = 24 + generator.nextUnit() * 42
+            let radiusY = 18 + generator.nextUnit() * 30
             let columnRadius = max(1, Int(ceil(radiusX / cellWidth)))
             let rowRadius = max(1, Int(ceil(radiusY / cellHeight)))
 

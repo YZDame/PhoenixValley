@@ -138,10 +138,10 @@ import Testing
         }.count) / Double(terrain.elevations.count)
     }
 
-    // A local river and one or two small lakes should occupy well under 5% of
-    // this 1.92 km² map; the previous fixed geometry occupied roughly 10%.
+    // Tributaries and three to five lakes should leave over 92% of the region
+    // available as dry land; the former broad fixed water geometry occupied 10%.
     #expect(
-        waterFractions.allSatisfy { $0 > 0.003 && $0 < 0.05 },
+        waterFractions.allSatisfy { $0 > 0.003 && $0 < 0.08 },
         "water fractions: \(waterFractions)"
     )
     #expect(Set(terrains.map(\.elevations)).count == terrains.count)
