@@ -2912,8 +2912,7 @@ final class RoadMapWorkspaceView: UIView, MKMapViewDelegate {
         if !map.overlays.isEmpty { map.removeOverlays(map.overlays) }
         accessibilityElements = usesAppleMap
             ? [map, canvas, nativeCompass, nativeScale] : [canvas, nativeCompass, nativeScale]
-        let area = project.realWorldMap?.bounds ?? (try! GeoBounds.around(latitude: 0, longitude: 0,
-            widthMeters: project.mapScale.widthMeters, heightMeters: project.mapScale.heightMeters))
+        let area = project.realWorldMap?.bounds ?? Self.syntheticBounds(for: project.mapScale)
         let targetScale = project.mapScale.metersPerPoint
         if displayedProjectID != project.id || geographicBounds != area || worldMetersPerPoint != targetScale {
             displayedProjectID = project.id
@@ -3024,6 +3023,20 @@ final class RoadMapWorkspaceView: UIView, MKMapViewDelegate {
         let xAxis = map.convert(coordinate(for: RoadPoint(x: 1600, y: 0), area: area), toPointTo: canvas)
         canvas.followNativeMap(origin: origin, xAxis: xAxis)
         onViewportChanged?(canvas.exportViewport)
+    }
+
+    private static func syntheticBounds(for mapScale: MapScale) -> GeoBounds {
+        let dy = max(50, mapScale.heightMeters) / 2 / 111_195
+        let dx = max(50, mapScale.widthMeters) / 2 / 111_195
+        if let bounds = try? GeoBounds(
+            minLatitude: max(-80, -dy),
+            minLongitude: max(-180, -dx),
+            maxLatitude: min(80, dy),
+            maxLongitude: min(180, dx)
+        ) {
+            return bounds
+        }
+        return try! GeoBounds(minLatitude: -0.1, minLongitude: -0.1, maxLatitude: 0.1, maxLongitude: 0.1)
     }
 }
 
