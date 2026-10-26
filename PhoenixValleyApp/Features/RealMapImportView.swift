@@ -69,10 +69,23 @@ struct RealMapImportView: View {
                         loadOpenStreetMap()
                     }
                     .accessibilityIdentifier("real-map-download")
+                    Button("使用 Apple 地图底图", systemImage: "map") {
+                        focusedField = nil
+                        guard let lat = Double(latitude), let lon = Double(longitude) else {
+                            phase = .failed("请输入有效的十进制经纬度。")
+                            return
+                        }
+                        do {
+                            let bounds = try GeoBounds.around(latitude: lat, longitude: lon,
+                                widthMeters: widthMeters, heightMeters: widthMeters * 0.75)
+                            if document.importRealWorldProject(.appleMap(name: name, bounds: bounds)) { dismiss() }
+                        } catch { phase = .failed(error.localizedDescription) }
+                    }
+                    .accessibilityIdentifier("real-map-apple")
                 } header: {
-                    Text("从 OpenStreetMap 导入")
+                    Text("真实世界地图")
                 } footer: {
-                    Text("按中心位置截取所选范围。道路、水域、绿地与建筑会简化成可编辑地图；不包含卫星影像或真实高程。默认位置在台北信义区。")
+                    Text("Apple 地图提供原生底图和地图手势；底图上的道路不参与游戏编辑。OpenStreetMap 可导入可编辑道路。按中心位置截取所选范围。道路、水域、绿地与建筑会简化成可编辑地图；不包含卫星影像或真实高程。默认位置在台北信义区。")
                 }
                 Section {
                     Picker("简化程度", selection: $simplificationMeters) {

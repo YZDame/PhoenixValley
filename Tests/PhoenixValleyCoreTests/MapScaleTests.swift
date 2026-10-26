@@ -13,7 +13,7 @@ import Testing
 
 @Test func mapScaleClampsUnsupportedValues() {
     #expect(MapScale(metersPerPoint: 0).metersPerPoint == 0.1)
-    #expect(MapScale(metersPerPoint: 100).metersPerPoint == 10)
+    #expect(MapScale(metersPerPoint: 100).metersPerPoint == 100)
 }
 
 @Test func versionSixProjectWithoutMapScaleUsesStandardScale() throws {

@@ -19,6 +19,7 @@ public enum GeoMapImporter {
     public static let maximumRetainedPoints = 12_000
 
     public static func importMap(data: Data, format: GeoImportFormat, options: GeoImportOptions = .init()) throws -> GeoImportResult {
+        guard format != .appleMaps else { throw GeoImportError.invalid("Apple 地图由 MapKit 在线提供，请直接创建地图。") }
         guard !data.isEmpty, data.count <= maximumBytes else { throw GeoImportError.invalid("文件为空或超过 8 MB；请缩小导入区域。") }
         guard options.simplificationMeters.isFinite, (0...100).contains(options.simplificationMeters) else { throw GeoImportError.invalid("简化距离须为 0–100 米。") }
         if format == .esriASCII { return try importElevation(data: data, options: options) }

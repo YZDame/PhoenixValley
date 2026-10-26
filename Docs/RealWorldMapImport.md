@@ -55,6 +55,6 @@ GeoMapImportTests 验证源共享节点保留、无共享交叉不虚构连接�
 - 台北默认 800 × 600 米样本为 232 段道路、299 个地物，5221 个输入点简化为 2903 个点。`RealWorldMap-Taipei.png` 由最终 PNG 导出器生成并检查，画布采用同一底图渲染。© OpenStreetMap contributors，ODbL 1.0。
 - PNG 像素、SVG 图层与来源、GeoJSON 地理坐标往返和图层隐藏均有回归测试。KML 与 ASC 的解析及重载由 Core 测试覆盖，尚未在实体 iPad 上走完文件选择流程。模拟器测试截图存在窗口/朝向裁剪问题，不作为像素一致性依据。
 
-查看记录见 `RealWorldMapDecisions.tsv`。本 PR 不依赖画布旋转 PR；两者都从 master 分出，原工作区的批量拆除改动未包含。
+本 PR 与画布旋转 PR 均从 master 分出，原工作区的批量拆除改动未包含。
 
 两个分支的合并树已检查为无冲突，并在临时源码副本中通过 iPad Simulator 构建与启动。此检查没有合并远程 PR；各功能的交互测试仍以上述各自分支测试为准。

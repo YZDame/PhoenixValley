@@ -137,7 +137,7 @@ public enum MapExporter {
         context.scaleBy(x: 1, y: -1)
     }
 
-    private static func draw(_ project: RoadProject, in context: CGContext) {
+    private static func draw(_ project: RoadProject, in context: CGContext, decorations: Bool = true) {
         let palette = ExportPalette(theme: project.theme)
         let fullCanvas = CGRect(
             x: 0,
@@ -221,8 +221,8 @@ public enum MapExporter {
             palette: palette,
             in: context
         )
-        drawScaleBar(project.mapScale, in: context)
-        if let map = project.realWorldMap {
+        if decorations { drawScaleBar(project.mapScale, in: context) }
+        if decorations, let map = project.realWorldMap {
             CartographicRenderer.drawAttribution(map.attribution, in: context, canvasSize: fullCanvas.size)
         }
     }
@@ -699,7 +699,7 @@ public enum MapExporter {
         context.restoreGState()
     }
 
-    private static func svgData(for project: RoadProject) throws -> Data {
+    private static func svgData(for project: RoadProject, decorations: Bool = true) throws -> Data {
         let palette = ExportPalette(theme: project.theme)
         var body: [String] = []
         let background = project.layerVisibility.showsTerrain
@@ -796,8 +796,8 @@ public enum MapExporter {
             palette: palette,
             to: &body
         )
-        appendSVGScaleBar(project.mapScale, to: &body)
-        if let map = project.realWorldMap {
+        if decorations { appendSVGScaleBar(project.mapScale, to: &body) }
+        if decorations, let map = project.realWorldMap {
             body.append(#"<g id="map-attribution"><rect x="16" y="1169" width="1568" height="23" fill="white" fill-opacity="0.9"/><text x="24" y="1185" font-family="Helvetica, sans-serif" font-size="12" fill="rgb(48,48,48)">\#(xmlEscaped(map.attribution))</text></g>"#)
         }
         let title = xmlEscaped(project.name)
@@ -1469,104 +1469,9 @@ private struct ExportPalette: Sendable {
     }
 
     init(theme: MapTheme) {
-        switch theme {
-        case .topographic:
-            self.init(
-                water: .init(red: 0.69, green: 0.84, blue: 0.9),
-                plain: .init(red: 0.82, green: 0.88, blue: 0.67),
-                lowland: .init(red: 0.67, green: 0.8, blue: 0.53),
-                hill: .init(red: 0.77, green: 0.69, blue: 0.47),
-                mountain: .init(red: 0.61, green: 0.5, blue: 0.37),
-                grid: .init(red: 0, green: 0, blue: 0, alpha: 0.045),
-                contour: .init(red: 0.36, green: 0.27, blue: 0.18, alpha: 0.28),
-                shoreline: .init(red: 0.23, green: 0.38, blue: 0.42, alpha: 0.5),
-                roadCasing: .init(red: 0.18, green: 0.25, blue: 0.22),
-                motorway: .init(red: 1, green: 1, blue: 1),
-                arterial: .init(red: 0.96, green: 0.83, blue: 0.28),
-                street: .init(red: 0.86, green: 0.93, blue: 0.82),
-                railway: .init(red: 0.28, green: 0.2, blue: 0.16)
-            )
-        case .planning:
-            self.init(
-                water: .init(red: 0.86, green: 0.92, blue: 0.94),
-                plain: .init(red: 0.96, green: 0.95, blue: 0.89),
-                lowland: .init(red: 0.9, green: 0.91, blue: 0.8),
-                hill: .init(red: 0.87, green: 0.82, blue: 0.68),
-                mountain: .init(red: 0.76, green: 0.7, blue: 0.62),
-                grid: .init(red: 0, green: 0, blue: 0, alpha: 0.05),
-                contour: .init(red: 0.38, green: 0.31, blue: 0.23, alpha: 0.22),
-                shoreline: .init(red: 0, green: 0, blue: 0, alpha: 0.2),
-                roadCasing: .init(red: 0.66, green: 0.64, blue: 0.58),
-                motorway: .init(red: 0.94, green: 0.75, blue: 0.44),
-                arterial: .init(red: 0.99, green: 0.88, blue: 0.64),
-                street: .init(red: 1, green: 0.99, blue: 0.97),
-                railway: .init(red: 0.36, green: 0.37, blue: 0.35)
-            )
-        case .ink:
-            self.init(
-                water: .init(red: 0.93, green: 0.93, blue: 0.93),
-                plain: .init(red: 0.985, green: 0.985, blue: 0.985),
-                lowland: .init(red: 0.955, green: 0.955, blue: 0.955),
-                hill: .init(red: 0.92, green: 0.92, blue: 0.92),
-                mountain: .init(red: 0.86, green: 0.86, blue: 0.86),
-                grid: .init(red: 0, green: 0, blue: 0, alpha: 0.04),
-                contour: .init(red: 0, green: 0, blue: 0, alpha: 0.16),
-                shoreline: .init(red: 0, green: 0, blue: 0, alpha: 0.28),
-                roadCasing: .init(red: 1, green: 1, blue: 1),
-                motorway: .init(red: 0.08, green: 0.08, blue: 0.08),
-                arterial: .init(red: 0.2, green: 0.2, blue: 0.2),
-                street: .init(red: 0.48, green: 0.48, blue: 0.48),
-                railway: .init(red: 0, green: 0, blue: 0)
-            )
-        case .coastal:
-            self.init(
-                water: .init(red: 0.49, green: 0.77, blue: 0.86),
-                plain: .init(red: 0.96, green: 0.91, blue: 0.76),
-                lowland: .init(red: 0.84, green: 0.87, blue: 0.67),
-                hill: .init(red: 0.78, green: 0.72, blue: 0.54),
-                mountain: .init(red: 0.57, green: 0.48, blue: 0.4),
-                grid: .init(red: 1, green: 1, blue: 1, alpha: 0.14),
-                contour: .init(red: 0.22, green: 0.38, blue: 0.4, alpha: 0.25),
-                shoreline: .init(red: 0.12, green: 0.34, blue: 0.42, alpha: 0.55),
-                roadCasing: .init(red: 0.95, green: 0.92, blue: 0.78),
-                motorway: .init(red: 0.16, green: 0.3, blue: 0.36),
-                arterial: .init(red: 0.93, green: 0.52, blue: 0.22),
-                street: .init(red: 0.96, green: 0.88, blue: 0.62),
-                railway: .init(red: 0.35, green: 0.22, blue: 0.17)
-            )
-        case .midnight:
-            self.init(
-                water: .init(red: 0.05, green: 0.1, blue: 0.17),
-                plain: .init(red: 0.11, green: 0.16, blue: 0.2),
-                lowland: .init(red: 0.14, green: 0.22, blue: 0.23),
-                hill: .init(red: 0.2, green: 0.27, blue: 0.25),
-                mountain: .init(red: 0.3, green: 0.32, blue: 0.28),
-                grid: .init(red: 1, green: 1, blue: 1, alpha: 0.08),
-                contour: .init(red: 0.54, green: 0.72, blue: 0.68, alpha: 0.28),
-                shoreline: .init(red: 0.48, green: 0.7, blue: 0.78, alpha: 0.45),
-                roadCasing: .init(red: 0.04, green: 0.08, blue: 0.13),
-                motorway: .init(red: 0.68, green: 0.84, blue: 0.95),
-                arterial: .init(red: 0.98, green: 0.7, blue: 0.31),
-                street: .init(red: 0.55, green: 0.72, blue: 0.72),
-                railway: .init(red: 0.78, green: 0.55, blue: 0.84)
-            )
-        case .forest:
-            self.init(
-                water: .init(red: 0.43, green: 0.68, blue: 0.69),
-                plain: .init(red: 0.78, green: 0.84, blue: 0.69),
-                lowland: .init(red: 0.58, green: 0.72, blue: 0.5),
-                hill: .init(red: 0.42, green: 0.58, blue: 0.38),
-                mountain: .init(red: 0.3, green: 0.4, blue: 0.31),
-                grid: .init(red: 0, green: 0, blue: 0, alpha: 0.05),
-                contour: .init(red: 0.16, green: 0.3, blue: 0.18, alpha: 0.3),
-                shoreline: .init(red: 0.12, green: 0.3, blue: 0.28, alpha: 0.5),
-                roadCasing: .init(red: 0.7, green: 0.78, blue: 0.58),
-                motorway: .init(red: 0.23, green: 0.3, blue: 0.25),
-                arterial: .init(red: 0.77, green: 0.55, blue: 0.21),
-                street: .init(red: 0.87, green: 0.82, blue: 0.58),
-                railway: .init(red: 0.3, green: 0.19, blue: 0.14)
-            )
-        }
+        let p = theme.palette
+        func color(_ c: MapColor) -> ExportColor { ExportColor(red: c.red, green: c.green, blue: c.blue, alpha: c.alpha) }
+        self.init(water: color(p.water), plain: color(p.plain), lowland: color(p.lowland), hill: color(p.hill), mountain: color(p.mountain), grid: color(p.grid), contour: color(p.contour), shoreline: color(p.shoreline), roadCasing: color(p.roadCasing), motorway: color(p.motorway), arterial: color(p.arterial), street: color(p.street), railway: color(p.railway))
     }
 
     private init(
@@ -1651,5 +1556,153 @@ private extension RoadKind {
         case .street: 3.5
         case .railway: 4
         }
+    }
+}
+
+extension MapExporter {
+    public static func data(for project: RoadProject, format: MapExportFormat, options: MapExportOptions) throws -> Data {
+        switch format {
+        case .png: return try composedPNG(project, options: options)
+        case .pdf: return try composedPDF(project, options: options)
+        case .svg: return try composedSVG(project, options: options)
+        case .geoJSON: return try composedGeoJSON(project, options: options)
+        }
+    }
+
+    private static func outputSize(_ options: MapExportOptions) -> CGSize {
+        CGSize(width: options.viewport?.width ?? 1600, height: options.viewport?.height ?? 1200)
+    }
+
+    private static func composedPNG(_ project: RoadProject, options: MapExportOptions) throws -> Data {
+        let size = outputSize(options)
+        guard let context = CGContext(data: nil, width: Int(size.width.rounded()), height: Int(size.height.rounded()),
+            bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { throw MapExporterError.couldNotCreateGraphicsContext }
+        context.translateBy(x: 0, y: size.height); context.scaleBy(x: 1, y: -1)
+        compose(project, options: options, size: size, in: context)
+        guard let image = context.makeImage() else { throw MapExporterError.couldNotEncodeImage }
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil) else { throw MapExporterError.couldNotEncodeImage }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else { throw MapExporterError.couldNotEncodeImage }
+        return data as Data
+    }
+
+    private static func composedPDF(_ project: RoadProject, options: MapExportOptions) throws -> Data {
+        let data = NSMutableData(), size = outputSize(options)
+        guard let consumer = CGDataConsumer(data: data as CFMutableData) else { throw MapExporterError.couldNotCreateGraphicsContext }
+        var box = CGRect(origin: .zero, size: size)
+        guard let context = CGContext(consumer: consumer, mediaBox: &box, nil) else { throw MapExporterError.couldNotCreateGraphicsContext }
+        context.beginPDFPage(nil)
+        context.translateBy(x: 0, y: size.height); context.scaleBy(x: 1, y: -1)
+        compose(project, options: options, size: size, in: context)
+        context.endPDFPage(); context.closePDF()
+        return data as Data
+    }
+
+    private static func compose(_ project: RoadProject, options: MapExportOptions, size: CGSize, in context: CGContext) {
+        context.setFillColor(project.theme.palette.plain.cgColor)
+        context.fill(CGRect(origin: .zero, size: size))
+        context.saveGState()
+        context.clip(to: CGRect(origin: .zero, size: size))
+        if let v = options.viewport {
+            context.translateBy(x: v.camera.translation.x, y: v.camera.translation.y)
+            context.rotate(by: v.camera.rotation)
+            context.scaleBy(x: v.camera.scale, y: v.camera.scale)
+        }
+        draw(project, in: context, decorations: false)
+        context.restoreGState()
+        let color = project.theme == .midnight ? CGColor(gray: 0.94, alpha: 1) : CGColor(gray: 0.16, alpha: 1)
+        if options.showsTitle { outputText(project.name, at: CGPoint(x: 26, y: 32), fontSize: 28, color: color, in: context) }
+        let metersPerPixel = project.mapScale.metersPerPoint / (options.viewport?.camera.scale ?? 1)
+        if options.showsScale {
+            let distance = niceScaleDistance(atMost: 140*metersPerPixel)
+            let width = distance/metersPerPixel
+            let y = size.height-40
+            context.setStrokeColor(color); context.setLineWidth(2)
+            context.move(to: CGPoint(x: 26, y: y)); context.addLine(to: CGPoint(x: 26+width, y: y))
+            context.move(to: CGPoint(x: 26, y: y-6)); context.addLine(to: CGPoint(x: 26, y: y+2))
+            context.move(to: CGPoint(x: 26+width, y: y-6)); context.addLine(to: CGPoint(x: 26+width, y: y+2))
+            context.strokePath()
+            outputText(formattedScaleDistance(distance), at: CGPoint(x: 26, y: y-28), fontSize: 15, color: color, in: context)
+        }
+        if options.showsInformation {
+            let text = informationText(for: project, options: options)
+            outputText(text, at: CGPoint(x: 26, y: options.showsTitle ? 72 : 32), fontSize: 15, color: color, in: context)
+        }
+        if let map = project.realWorldMap, options.showsAttribution || map.source == .osmXML {
+            outputText(map.attribution, at: CGPoint(x: 26, y: size.height-23), fontSize: 12, color: color, in: context)
+        }
+    }
+
+    private static func informationText(for project: RoadProject, options: MapExportOptions) -> String {
+        let totalRoads = Set(project.roads.map(\.sourceRoadID)).count
+        if let v = options.viewport {
+            let metersPerPixel = project.mapScale.metersPerPoint / v.camera.scale
+            let widthMeters = v.width * metersPerPixel
+            let heightMeters = v.height * metersPerPixel
+            let widthStr = widthMeters >= 1000 ? "\(String(format: "%.1f", widthMeters / 1000)) km" : "\(Int(widthMeters.rounded())) m"
+            let heightStr = heightMeters >= 1000 ? "\(String(format: "%.1f", heightMeters / 1000)) km" : "\(Int(heightMeters.rounded())) m"
+            return "当前视野 \(widthStr) × \(heightStr) · 全图 \(totalRoads) 条道路"
+        } else {
+            let widthKm = Int((project.mapScale.widthMeters / 1000).rounded())
+            let heightKm = Int((project.mapScale.heightMeters / 1000).rounded())
+            return "\(widthKm) × \(heightKm) km · \(totalRoads) 条道路"
+        }
+    }
+
+    private static func outputText(_ text: String, at origin: CGPoint, fontSize: Double, color: CGColor, in context: CGContext) {
+        let attributes: [NSAttributedString.Key: Any] = [
+            NSAttributedString.Key(kCTFontAttributeName as String): CTFontCreateWithName("Helvetica" as CFString, fontSize, nil),
+            NSAttributedString.Key(kCTForegroundColorAttributeName as String): color]
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: attributes))
+        context.saveGState(); context.translateBy(x: origin.x, y: origin.y+fontSize)
+        context.scaleBy(x: 1, y: -1); context.textMatrix = .identity; context.textPosition = .zero
+        CTLineDraw(line, context); context.restoreGState()
+    }
+
+    private static func composedSVG(_ project: RoadProject, options: MapExportOptions) throws -> Data {
+        let base = String(decoding: try svgData(for: project, decorations: false), as: UTF8.self)
+        guard let start = base.range(of: "<svg"), let openingEnd = base[start.upperBound...].firstIndex(of: ">"),
+              let closing = base.range(of: "</svg>", options: .backwards) else { throw MapExporterError.couldNotEncodeText }
+        let content = String(base[base.index(after: openingEnd)..<closing.lowerBound])
+        let size = outputSize(options)
+        let matrix: String
+        if let v = options.viewport {
+            let c = cos(v.camera.rotation)*v.camera.scale, s = sin(v.camera.rotation)*v.camera.scale
+            matrix = "matrix(\(c) \(s) \(-s) \(c) \(v.camera.translation.x) \(v.camera.translation.y))"
+        } else { matrix = "matrix(1 0 0 1 0 0)" }
+        let color = project.theme == .midnight ? "#F0F3EE" : "#293C40"
+        var labels: [String] = []
+        if options.showsTitle { labels.append("<text x=\"26\" y=\"60\" font-size=\"28\">\(xmlEscaped(project.name))</text>") }
+        if options.showsInformation {
+            let text = xmlEscaped(informationText(for: project, options: options))
+            labels.append("<text x=\"26\" y=\"\(options.showsTitle ? 88 : 48)\" font-size=\"15\">\(text)</text>")
+        }
+        if options.showsScale {
+            let metersPerPixel = project.mapScale.metersPerPoint/(options.viewport?.camera.scale ?? 1)
+            let distance = niceScaleDistance(atMost: 140*metersPerPixel), width = distance/metersPerPixel
+            let y = size.height-40
+            labels.append("<g id=\"export-scale\"><path d=\"M26 \(y)h\(width) M26 \(y-6)v8 M\(26+width) \(y-6)v8\" fill=\"none\" stroke=\"\(color)\" stroke-width=\"2\"/><text x=\"26\" y=\"\(y-10)\" font-size=\"15\">\(formattedScaleDistance(distance))</text></g>")
+        }
+        if let map = project.realWorldMap, options.showsAttribution || map.source == .osmXML {
+            labels.append("<text id=\"export-attribution\" x=\"26\" y=\"\(size.height-10)\" font-size=\"12\">\(xmlEscaped(map.attribution))</text>")
+        }
+        return Data("""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <svg xmlns="http://www.w3.org/2000/svg" width="\(size.width)" height="\(size.height)" viewBox="0 0 \(size.width) \(size.height)">
+          <defs><clipPath id="export-frame"><rect width="\(size.width)" height="\(size.height)"/></clipPath></defs>
+          <rect width="100%" height="100%" fill="\(project.theme.palette.plain.hex)"/>
+          <g clip-path="url(#export-frame)"><g transform="\(matrix)">\(content)</g></g>
+          <g font-family="Helvetica, sans-serif" fill="\(color)">\(labels.joined())</g>
+        </svg>
+        """.utf8)
+    }
+
+    private static func composedGeoJSON(_ project: RoadProject, options: MapExportOptions) throws -> Data {
+        // Geographic coordinates retain their CRS; a viewport is a spatial filter.
+        let data = try geoJSONData(for: project)
+        guard let view = options.viewport else { return data }
+        return try MapExportGeometryClipper.clip(data, to: view, project: project)
     }
 }

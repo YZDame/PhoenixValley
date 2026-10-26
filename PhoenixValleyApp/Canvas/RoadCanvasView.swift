@@ -1,9 +1,13 @@
+import MapKit
 import PhoenixValleyCore
 import SwiftUI
 import UIKit
 
 struct RoadCanvasRepresentable: UIViewRepresentable {
     let project: RoadProject
+    let onViewportChanged: (MapExportViewport) -> Void
+    let allowsFingerDrawing: Bool
+    let pendingRampPlan: RoadRampPlan?
     let pendingStructureReview: RoadStructureReviewRecord?
     let selectedKind: RoadKind
     let selectedLevel: RoadLevel
@@ -29,8 +33,10 @@ struct RoadCanvasRepresentable: UIViewRepresentable {
     let onInterchangeCrossingSelected: (UUID?) -> Void
     let onRampSelected: (UUID?) -> Void
 
-    func makeUIView(context: Context) -> RoadCanvasView {
-        let view = RoadCanvasView()
+    func makeUIView(context: Context) -> RoadMapWorkspaceView {
+        let workspace = RoadMapWorkspaceView()
+        let view = workspace.canvas
+        workspace.onViewportChanged = onViewportChanged
         view.onStrokeFinished = onStrokeFinished
         view.onEraseFinished = onEraseFinished
         view.onSelectionChanged = onSelectionChanged
@@ -38,10 +44,14 @@ struct RoadCanvasRepresentable: UIViewRepresentable {
         view.onControlPointMoved = onControlPointMoved
         view.onInterchangeCrossingSelected = onInterchangeCrossingSelected
         view.onRampSelected = onRampSelected
-        return view
+        return workspace
     }
 
-    func updateUIView(_ view: RoadCanvasView, context: Context) {
+    func updateUIView(_ workspace: RoadMapWorkspaceView, context: Context) {
+        let view = workspace.canvas
+        workspace.onViewportChanged = onViewportChanged
+        view.allowsFingerDrawing = allowsFingerDrawing
+        view.pendingRampPlan = pendingRampPlan
         let visibleRoads = project.roads.filter {
             project.layerVisibility.isVisible($0.kind)
         }
@@ -117,6 +127,7 @@ struct RoadCanvasRepresentable: UIViewRepresentable {
         view.selectedSourceRoadIDs = selectedSourceRoadIDs
         view.mapScale = project.mapScale
         view.accessibilityValue = [
+            project.name,
             project.mapScale.accessibilityDescription,
             isSelecting ? "选择模式，已选 \(selectedSourceRoadIDs.count) 条" : nil,
             isEditingInterchange
@@ -132,6 +143,7 @@ struct RoadCanvasRepresentable: UIViewRepresentable {
         view.onControlPointMoved = onControlPointMoved
         view.onInterchangeCrossingSelected = onInterchangeCrossingSelected
         view.onRampSelected = onRampSelected
+        workspace.update(project: project)
         view.refreshAccessibilityElements()
         view.setNeedsDisplay()
     }
@@ -178,10 +190,10 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
     }
 
     var terrain = TerrainGenerator.generate(seed: 1) {
-        didSet { if oldValue != terrain { terrainImage = nil } }
+        didSet { if oldValue != terrain { terrainDrawing = nil; elevationPaths = nil; waterPaths = nil } }
     }
     var realWorldMap: RealWorldMap? {
-        didSet { if oldValue != realWorldMap { terrainImage = nil } }
+        didSet { if oldValue != realWorldMap { terrainDrawing = nil } }
     }
     var roads: [RoadSegment] = []
     var constructionIssues: [RoadConstructionIssue] = []
@@ -241,23 +253,23 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         }
     }
     var mapScale: MapScale = .standard {
-        didSet { if oldValue != mapScale { terrainImage = nil } }
+        didSet { if oldValue != mapScale { terrainDrawing = nil } }
     }
     var theme: MapTheme = .planning {
-        didSet { if oldValue != theme { terrainImage = nil } }
+        didSet { if oldValue != theme { transitionTerrain() } }
     }
     var showsTerrain = true
     var showsHydrology = true {
-        didSet { if oldValue != showsHydrology { terrainImage = nil } }
+        didSet { if oldValue != showsHydrology { transitionTerrain() } }
     }
     var showsWatersheds = false {
-        didSet { if oldValue != showsWatersheds { terrainImage = nil } }
+        didSet { if oldValue != showsWatersheds { transitionTerrain() } }
     }
     var showsContours = true {
-        didSet { if oldValue != showsContours { terrainImage = nil } }
+        didSet { if oldValue != showsContours { transitionTerrain() } }
     }
     var showsGrid = true {
-        didSet { if oldValue != showsGrid { terrainImage = nil } }
+        didSet { if oldValue != showsGrid { transitionTerrain() } }
     }
     var onStrokeFinished: (([RoadPoint]) -> Void)?
     var onEraseFinished: ((RoadEraseRequest) -> Void)?
@@ -291,19 +303,52 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
     private var northResetRotation: Double = 0
     private var isRotating = false
     private var hasPositionedInitialMap = false
-    private var terrainImage: UIImage?
+    private var terrainDrawing: CGPDFDocument?
+    private var elevationPaths: [Int: CGMutablePath]?
+    private var waterPaths: [CGMutablePath]?
     private weak var panGesture: UIPanGestureRecognizer?
     private var scaleBarHideWorkItem: DispatchWorkItem?
     private var isScaleBarVisible = false
     private var minimumZoomHintHideWorkItem: DispatchWorkItem?
     private var isMinimumZoomHintVisible = false
+    private var zoomHint = "已显示完整可编辑区域，不能再缩小"
+    private let boundaryBlur = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
     private var didShowMinimumZoomHintForGesture = false
 
-    #if targetEnvironment(simulator)
-    private let allowsFingerDrawing = true
-    #else
-    private let allowsFingerDrawing = false
-    #endif
+    var allowsFingerDrawing = false {
+        didSet { if oldValue != allowsFingerDrawing { cancelContentInteraction(); updatePanTouchCount() } }
+    }
+    var pendingRampPlan: RoadRampPlan?
+    weak var nativeMap: MKMapView?
+    var exportViewport: MapExportViewport {
+        MapExportViewport(camera: viewport, width: bounds.width, height: bounds.height)
+    }
+
+    func useNativeNavigation(_ enabled: Bool) {
+        for gesture in gestureRecognizers ?? [] { gesture.isEnabled = !enabled }
+        isOpaque = !enabled
+        backgroundColor = enabled ? .clear : .systemBackground
+        compass.isHidden = enabled
+        zoomInButton.isHidden = enabled
+        zoomOutButton.isHidden = enabled
+    }
+
+    func followNativeMap(origin: CGPoint, xAxis: CGPoint) {
+        viewport = CanvasViewport(scale: hypot(xAxis.x-origin.x, xAxis.y-origin.y) / 1600,
+            rotation: atan2(xAxis.y-origin.y, xAxis.x-origin.x),
+            translation: RoadPoint(x: origin.x, y: origin.y))
+        updateBoundaryBlur()
+        refreshAccessibilityElements()
+        setNeedsDisplay()
+    }
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        // Native MapKit's recognizers live below this display-only overlay.
+        // Editing observes the same touches on the map, so two fingers always
+        // reach MapKit even while one finger or Pencil is drawing.
+        if nativeMap != nil { return nil }
+        return super.hitTest(point, with: event)
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -345,6 +390,9 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         addSubview(compass)
         configureZoomButton(zoomInButton, symbol: "plus", label: "放大地图", identifier: "canvas-zoom-in", action: #selector(zoomIn))
         configureZoomButton(zoomOutButton, symbol: "minus", label: "缩小地图", identifier: "canvas-zoom-out", action: #selector(zoomOut))
+        boundaryBlur.isUserInteractionEnabled = false
+        boundaryBlur.isHidden = true
+        addSubview(boundaryBlur)
         updateNavigationControls()
     }
 
@@ -359,6 +407,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        if nativeMap != nil { return }
         let inset = safeAreaInsets
         let controlX = max(inset.left + 8, bounds.width - inset.right - 58)
         compass.frame = CGRect(x: controlX, y: inset.top + 18, width: 44, height: 44)
@@ -396,6 +445,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
         let palette = theme.terrainPalette
+        if realWorldMap?.source != .appleMaps {
         context.setFillColor(
             (
                 showsTerrain && realWorldMap == nil && terrain.scenario.hasOceanBoundary
@@ -404,12 +454,15 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
             ).cgColor
         )
         context.fill(bounds)
+        }
 
         context.saveGState()
         context.translateBy(x: viewport.translation.x, y: viewport.translation.y)
         context.rotate(by: viewport.rotation)
         context.scaleBy(x: zoomScale, y: zoomScale)
-        if let realWorldMap, !showsTerrain {
+        if realWorldMap?.source == .appleMaps {
+            // Keep the live native basemap visible beneath editable roads.
+        } else if let realWorldMap, !showsTerrain {
             CartographicRenderer.draw(realWorldMap, theme: theme, showsTerrain: false, showsHydrology: showsHydrology, in: context)
         } else if showsTerrain {
             drawTerrain(in: context)
@@ -442,9 +495,10 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
             in: context
         )
         drawRoadSelection(in: context)
+        drawPendingRamp(in: context)
         drawActiveStroke(in: context)
         context.restoreGState()
-        if isScaleBarVisible {
+        if nativeMap == nil && isScaleBarVisible {
             drawScaleBar(in: context)
         }
         if isMinimumZoomHintVisible {
@@ -602,14 +656,26 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         zoom.accessibilityIdentifier = "canvas-viewport"
         zoom.accessibilityLabel = "地图缩放"
         zoom.accessibilityHint = accessibilityValue
-        zoom.accessibilityValue = String(format: "%.0f%%", viewport.scale * 100)
+        let zoomDescription = String(format: "%.0f%%", viewport.scale / fittedZoomScale * 100)
+        if let nativeMap {
+            let heading = Int(nativeMap.camera.heading.rounded()) % 360
+            zoom.accessibilityValue = "\(zoomDescription)，朝向 \(heading)°"
+        } else { zoom.accessibilityValue = "\(zoomDescription)，朝向 \(Int((viewport.rotation * 180 / .pi).rounded()))°" }
         zoom.accessibilityTraits = [.adjustable]
         // Keep this virtual map control clear of real buttons and overlaid palettes.
         // A full-view accessibility frame would mask their hit targets.
         zoom.accessibilityFrameInContainerSpace = bounds.insetBy(
             dx: bounds.width * 0.35, dy: bounds.height * 0.35
         )
-        zoom.adjust = { [weak self] increase in self?.zoom(by: increase ? 1.35 : 1 / 1.35) }
+        zoom.adjust = { [weak self] increase in
+            guard let self else { return }
+            if let map = self.nativeMap {
+                let camera = map.camera.copy() as! MKMapCamera
+                camera.centerCoordinateDistance *= increase ? 1/1.35 : 1.35
+                map.setCamera(camera, animated: true)
+            } else { self.zoom(by: increase ? 1.35 : 1/1.35) }
+        }
+        if nativeMap != nil { return [zoom] }
         return [zoom] + (compass.isHidden ? [] : [compass]) + [zoomInButton, zoomOutButton]
     }
 
@@ -720,24 +786,46 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: workItem)
     }
 
+    private func updateBoundaryBlur() {
+        boundaryBlur.isHidden = realWorldMap?.source == .appleMaps || zoomScale >= fittedZoomScale
+        guard !boundaryBlur.isHidden else { return }
+        boundaryBlur.frame = bounds
+        boundaryBlur.alpha = min(1, (fittedZoomScale - zoomScale) / (fittedZoomScale * 0.1))
+        let mask = CAShapeLayer()
+        let path = UIBezierPath(rect: bounds)
+        let corners = [RoadPoint(x: 0, y: 0), RoadPoint(x: 1600, y: 0),
+                       RoadPoint(x: 1600, y: 1200), RoadPoint(x: 0, y: 1200)].map(screenPoint)
+        path.move(to: corners[0])
+        corners.dropFirst().forEach { path.addLine(to: $0) }
+        path.close()
+        mask.path = path.cgPath
+        mask.fillRule = .evenOdd
+        boundaryBlur.layer.mask = mask
+    }
+
+    private var fittedZoomScale: CGFloat {
+        max(0.01, min(bounds.width / 1600, bounds.height / 1200))
+    }
     private var minimumZoomScale: CGFloat {
         guard bounds.width > 0, bounds.height > 0 else { return 0.2 }
         return min(bounds.width / 1600, bounds.height / 1200) * 0.92
     }
 
+
     private func constrainTranslation() {
         viewport.constrain(to: RoadPoint(x: bounds.width, y: bounds.height))
     }
 
-    private func showMinimumZoomHint() {
-        guard !didShowMinimumZoomHintForGesture else { return }
+    func showMinimumZoomHint(maximum: Bool = false) {
+        zoomHint = maximum ? "已达到最大放大倍率" : "已显示完整可编辑区域，不能再缩小"
+        guard !didShowMinimumZoomHintForGesture || nativeMap != nil else { return }
         didShowMinimumZoomHintForGesture = true
         minimumZoomHintHideWorkItem?.cancel()
         isMinimumZoomHintVisible = true
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         UIAccessibility.post(
             notification: .announcement,
-            argument: "已显示完整可编辑区域，不能再缩小"
+            argument: zoomHint
         )
         setNeedsDisplay()
 
@@ -750,7 +838,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
     }
 
     private func drawMinimumZoomHint() {
-        let message = "已显示完整可编辑区域"
+        let message = zoomHint
         let font = UIFont.preferredFont(forTextStyle: .footnote)
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
@@ -1501,23 +1589,31 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         return CGPoint(x: point.x, y: point.y)
     }
 
+    private func transitionTerrain() {
+        terrainDrawing = nil
+        guard !UIAccessibility.isReduceMotionEnabled else { return }
+        let transition = CATransition()
+        transition.type = .fade
+        transition.duration = 0.22
+        layer.add(transition, forKey: "mapAppearance")
+    }
+
     private func drawTerrain(in context: CGContext) {
-        let image: UIImage
-        if let cached = terrainImage {
-            image = cached
-        } else {
-            let format = UIGraphicsImageRendererFormat()
-            format.scale = 1
-            format.opaque = true
-            image = UIGraphicsImageRenderer(
-                size: CGSize(width: 1600, height: 1200),
-                format: format
-            ).image { renderer in
+        if terrainDrawing == nil {
+            let data = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 1600, height: 1200)).pdfData { renderer in
+                renderer.beginPage()
                 drawTerrainContent(in: renderer.cgContext)
             }
-            terrainImage = image
+            if let provider = CGDataProvider(data: data as CFData) {
+                terrainDrawing = CGPDFDocument(provider)
+            }
         }
-        image.draw(in: CGRect(x: 0, y: 0, width: 1600, height: 1200))
+        guard let page = terrainDrawing?.page(at: 1) else { return }
+        context.saveGState()
+        context.translateBy(x: 0, y: 1200)
+        context.scaleBy(x: 1, y: -1)
+        context.drawPDFPage(page)
+        context.restoreGState()
     }
 
     private func drawTerrainContent(in context: CGContext) {
@@ -1532,7 +1628,6 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
             context.saveGState()
             context.clip(to: CGRect(x: 0, y: 0, width: 1600, height: 1200))
             drawElevationBands(in: context, palette: palette)
-            CartographicRenderer.drawRelief(terrain, mapScale: mapScale, in: context)
             if showsGrid {
                 drawGrid(in: context, color: palette.grid)
             }
@@ -1568,7 +1663,6 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         context.addPath(shorePath)
         context.clip()
         drawElevationBands(in: context, palette: palette)
-        CartographicRenderer.drawRelief(terrain, mapScale: mapScale, in: context)
         if showsGrid {
             drawGrid(in: context, color: palette.grid)
         }
@@ -1588,40 +1682,145 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
 
     private func drawElevationBands(in context: CGContext, palette: TerrainPalette) {
         guard terrain.hasElevationData else { return }
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        format.opaque = true
-        let elevationImage = UIGraphicsImageRenderer(
-            size: CGSize(width: terrain.gridWidth, height: terrain.gridHeight),
-            format: format
-        ).image { renderer in
-            for row in 0..<terrain.gridHeight {
-                for column in 0..<terrain.gridWidth {
-                    let value = Double(terrain.elevations[row * terrain.gridWidth + column])
-                        / Double(UInt16.max)
-                    let surface = terrain.hydrology.surface(column: column, row: row)
-                    let color: UIColor
-                    if showsHydrology, terrain.hydrology.hasData {
-                        color = switch surface {
-                        case .river, .lake, .ocean: palette.water
-                        case .wetland: palette.wetland
-                        case .land: palette.color(for: value)
-                        }
-                    } else if !terrain.hydrology.hasData, value <= terrain.waterLevel {
-                        color = palette.water
-                    } else {
-                        color = palette.color(for: value)
+        struct Vertex { var point: CGPoint; var height: Double }
+        var paths: [Int: CGMutablePath] = [:]
+        let dx = 1600.0/Double(terrain.gridWidth-1)
+        let dy = 1200.0/Double(terrain.gridHeight-1)
+        func clip(_ polygon: [Vertex], at threshold: Double, above: Bool) -> [Vertex] {
+            guard var previous = polygon.last else { return [] }
+            var result: [Vertex] = []
+            for current in polygon {
+                let previousInside = above ? previous.height >= threshold : previous.height <= threshold
+                let currentInside = above ? current.height >= threshold : current.height <= threshold
+                if previousInside != currentInside {
+                    let fraction = (threshold-previous.height)/(current.height-previous.height)
+                    result.append(Vertex(point: CGPoint(x: previous.point.x+(current.point.x-previous.point.x)*fraction,
+                        y: previous.point.y+(current.point.y-previous.point.y)*fraction), height: threshold))
+                }
+                if currentInside { result.append(current) }
+                previous = current
+            }
+            return result
+        }
+        func append(_ vertices: [Vertex], bucket: Int) {
+            guard vertices.count >= 3 else { return }
+            let path = paths[bucket] ?? CGMutablePath()
+            path.move(to: vertices[0].point)
+            vertices.dropFirst().forEach { path.addLine(to: $0.point) }
+            path.closeSubpath()
+            paths[bucket] = path
+        }
+        if let cached = elevationPaths { paths = cached } else {
+        for row in 0..<(terrain.gridHeight-1) {
+            for column in 0..<(terrain.gridWidth-1) {
+                let corners = [(column,row),(column+1,row),(column+1,row+1),(column,row+1)].map { x,y in
+                    Vertex(point: CGPoint(x: Double(x)*dx, y: Double(y)*dy),
+                        height: Double(terrain.elevations[y*terrain.gridWidth+x])/Double(UInt16.max))
+                }
+                for triangle in [[corners[0],corners[1],corners[2]], [corners[0],corners[2],corners[3]]] {
+                    let lower = Int(triangle.map(\.height).min()!*24)
+                    let upper = Int(triangle.map(\.height).max()!*24)
+                    for bucket in lower...upper {
+                        append(clip(clip(triangle, at: Double(bucket)/24, above: true),
+                            at: Double(bucket+1)/24, above: false), bucket: bucket)
                     }
-                    renderer.cgContext.setFillColor(color.cgColor)
-                    renderer.cgContext.fill(CGRect(x: column, y: row, width: 1, height: 1))
                 }
             }
         }
-
+        elevationPaths = paths
+        }
         context.saveGState()
-        context.interpolationQuality = .high
-        elevationImage.draw(in: CGRect(x: 0, y: 0, width: 1600, height: 1200))
+        context.setShouldAntialias(false)
+        for bucket in paths.keys.sorted() {
+            let color = bucket == -1 ? palette.water : (bucket == -2 ? palette.wetland : palette.color(for: Double(bucket)/24))
+            context.setFillColor(color.cgColor)
+            context.addPath(paths[bucket]!)
+            context.fillPath()
+        }
         context.restoreGState()
+        guard showsHydrology else { return }
+        if let waterPaths {
+            for (index, path) in waterPaths.enumerated() {
+                context.setFillColor((index == 0 ? palette.wetland : palette.water).cgColor)
+                context.addPath(path)
+                context.fillPath()
+            }
+            return
+        }
+        var builtWaterPaths: [CGMutablePath] = []
+        for wetland in [true, false] {
+            let waterPath = CGMutablePath()
+            struct Edge: Hashable { let start: Int; let end: Int }
+            var edges = Set<Edge>()
+            var points: [Int: CGPoint] = [:]
+            func vertexID(_ point: CGPoint) -> Int {
+                let x = Int((point.x / dx * 2).rounded())
+                let y = Int((point.y / dy * 2).rounded())
+                let id = y * (terrain.gridWidth * 2 + 1) + x
+                points[id] = point
+                return id
+            }
+            for row in 0..<(terrain.gridHeight - 1) {
+                for column in 0..<(terrain.gridWidth - 1) {
+                    let vertices = [(column,row),(column+1,row),(column+1,row+1),(column,row+1)].map { x,y in
+                        let surface = terrain.hydrology.surface(column: x, row: y)
+                        let covered = wetland ? surface == .wetland : (surface == .river || surface == .lake)
+                        return Vertex(point: CGPoint(x: Double(x)*dx, y: Double(y)*dy), height: covered ? 1 : 0)
+                    }
+                    for triangle in [[vertices[0],vertices[1],vertices[2]], [vertices[0],vertices[2],vertices[3]]] {
+                        let polygon = clip(triangle, at: 0.5, above: true)
+                        guard polygon.count >= 3 else { continue }
+                        let ids = polygon.map { vertexID($0.point) }
+                        for index in ids.indices {
+                            let a = ids[index], b = ids[(index + 1) % ids.count]
+                            if edges.remove(Edge(start: b, end: a)) == nil {
+                                edges.insert(Edge(start: a, end: b))
+                            }
+                        }
+                    }
+                }
+            }
+            // Cancel interior triangle edges, then round each continuous shoreline.
+            // Curves describe the boundary, rather than rounded individual tiles.
+            var next: [Int: [Int]] = [:]
+            for edge in edges { next[edge.start, default: []].append(edge.end) }
+            while let start = next.keys.min() {
+                var ring: [CGPoint] = []
+                var current = start
+                repeat {
+                    guard let point = points[current], let target = next[current]?.popLast() else { break }
+                    ring.append(point)
+                    if next[current]?.isEmpty == true { next.removeValue(forKey: current) }
+                    current = target
+                } while current != start
+                guard ring.count >= 3, current == start else { continue }
+                // Remove cell-scale stair steps before fitting quadratic curves.
+                for _ in 0..<(ring.count > 12 ? 5 : 1) {
+                    let previousRing = ring
+                    for index in ring.indices {
+                        let a = previousRing[(index + ring.count - 1) % ring.count]
+                        let b = previousRing[index]
+                        let c = previousRing[(index + 1) % ring.count]
+                        ring[index] = CGPoint(x: (a.x + 2 * b.x + c.x) / 4,
+                                              y: (a.y + 2 * b.y + c.y) / 4)
+                    }
+                }
+                func middle(_ a: CGPoint, _ b: CGPoint) -> CGPoint {
+                    CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
+                }
+                waterPath.move(to: middle(ring.last!, ring[0]))
+                for index in ring.indices {
+                    waterPath.addQuadCurve(to: middle(ring[index], ring[(index + 1) % ring.count]),
+                                           control: ring[index])
+                }
+                waterPath.closeSubpath()
+            }
+            builtWaterPaths.append(waterPath)
+            context.setFillColor((wetland ? palette.wetland : palette.water).cgColor)
+            context.addPath(waterPath)
+            context.fillPath()
+        }
+        waterPaths = builtWaterPaths
     }
 
     private func drawGrid(in context: CGContext, color: UIColor) {
@@ -2344,6 +2543,22 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         }
     }
 
+    private func drawPendingRamp(in context: CGContext) {
+        guard let plan = pendingRampPlan else { return }
+        context.saveGState()
+        context.setStrokeColor(UIColor.systemOrange.cgColor)
+        context.setLineWidth(5 / zoomScale)
+        context.setLineCap(.round)
+        context.setLineDash(phase: 0, lengths: [9 / zoomScale, 5 / zoomScale])
+        for segment in plan.roadSegments {
+            guard let first = segment.points.first else { continue }
+            context.move(to: first.cgPoint)
+            for point in segment.points.dropFirst() { context.addLine(to: point.cgPoint) }
+            context.strokePath()
+        }
+        context.restoreGState()
+    }
+
     private func drawActiveStroke(in context: CGContext) {
         guard !isSelecting, let first = activeStroke.first else { return }
         context.saveGState()
@@ -2525,85 +2740,12 @@ private extension UIColor {
 
 private extension MapTheme {
     var terrainPalette: TerrainPalette {
-        switch self {
-        case .topographic:
-            TerrainPalette(
-                water: UIColor(red: 0.69, green: 0.84, blue: 0.9, alpha: 1),
-                plain: UIColor(red: 0.82, green: 0.88, blue: 0.67, alpha: 1),
-                lowland: UIColor(red: 0.67, green: 0.8, blue: 0.53, alpha: 1),
-                hill: UIColor(red: 0.77, green: 0.69, blue: 0.47, alpha: 1),
-                mountain: UIColor(red: 0.61, green: 0.5, blue: 0.37, alpha: 1),
-                grid: UIColor.black.withAlphaComponent(0.045),
-                contour: UIColor(red: 0.36, green: 0.27, blue: 0.18, alpha: 0.28),
-                shoreline: UIColor(red: 0.23, green: 0.38, blue: 0.42, alpha: 0.5)
-            )
-        case .planning:
-            TerrainPalette(
-                water: UIColor(red: 0.86, green: 0.92, blue: 0.94, alpha: 1),
-                plain: UIColor(red: 0.96, green: 0.95, blue: 0.89, alpha: 1),
-                lowland: UIColor(red: 0.9, green: 0.91, blue: 0.8, alpha: 1),
-                hill: UIColor(red: 0.87, green: 0.82, blue: 0.68, alpha: 1),
-                mountain: UIColor(red: 0.76, green: 0.7, blue: 0.62, alpha: 1),
-                grid: UIColor.black.withAlphaComponent(0.05),
-                contour: UIColor(red: 0.38, green: 0.31, blue: 0.23, alpha: 0.22),
-                shoreline: UIColor.black.withAlphaComponent(0.2)
-            )
-        case .ink:
-            TerrainPalette(
-                water: UIColor(white: 0.93, alpha: 1),
-                plain: UIColor(white: 0.985, alpha: 1),
-                lowland: UIColor(white: 0.955, alpha: 1),
-                hill: UIColor(white: 0.92, alpha: 1),
-                mountain: UIColor(white: 0.86, alpha: 1),
-                grid: UIColor.black.withAlphaComponent(0.04),
-                contour: UIColor.black.withAlphaComponent(0.16),
-                shoreline: UIColor.black.withAlphaComponent(0.28)
-            )
-        case .coastal:
-            TerrainPalette(
-                water: UIColor(red: 0.49, green: 0.77, blue: 0.86, alpha: 1),
-                plain: UIColor(red: 0.96, green: 0.91, blue: 0.76, alpha: 1),
-                lowland: UIColor(red: 0.84, green: 0.87, blue: 0.67, alpha: 1),
-                hill: UIColor(red: 0.78, green: 0.72, blue: 0.54, alpha: 1),
-                mountain: UIColor(red: 0.57, green: 0.48, blue: 0.4, alpha: 1),
-                grid: UIColor.white.withAlphaComponent(0.14),
-                contour: UIColor(red: 0.22, green: 0.38, blue: 0.4, alpha: 0.25),
-                shoreline: UIColor(red: 0.12, green: 0.34, blue: 0.42, alpha: 0.55)
-            )
-        case .midnight:
-            TerrainPalette(
-                water: UIColor(red: 0.05, green: 0.1, blue: 0.17, alpha: 1),
-                plain: UIColor(red: 0.11, green: 0.16, blue: 0.2, alpha: 1),
-                lowland: UIColor(red: 0.14, green: 0.22, blue: 0.23, alpha: 1),
-                hill: UIColor(red: 0.2, green: 0.27, blue: 0.25, alpha: 1),
-                mountain: UIColor(red: 0.3, green: 0.32, blue: 0.28, alpha: 1),
-                grid: UIColor.white.withAlphaComponent(0.08),
-                contour: UIColor(red: 0.54, green: 0.72, blue: 0.68, alpha: 0.28),
-                shoreline: UIColor(red: 0.48, green: 0.7, blue: 0.78, alpha: 0.45)
-            )
-        case .forest:
-            TerrainPalette(
-                water: UIColor(red: 0.43, green: 0.68, blue: 0.69, alpha: 1),
-                plain: UIColor(red: 0.78, green: 0.84, blue: 0.69, alpha: 1),
-                lowland: UIColor(red: 0.58, green: 0.72, blue: 0.5, alpha: 1),
-                hill: UIColor(red: 0.42, green: 0.58, blue: 0.38, alpha: 1),
-                mountain: UIColor(red: 0.3, green: 0.4, blue: 0.31, alpha: 1),
-                grid: UIColor.black.withAlphaComponent(0.05),
-                contour: UIColor(red: 0.16, green: 0.3, blue: 0.18, alpha: 0.3),
-                shoreline: UIColor(red: 0.12, green: 0.3, blue: 0.28, alpha: 0.5)
-            )
-        }
+        let p = palette
+        return TerrainPalette(water: UIColor(cgColor: p.water.cgColor), plain: UIColor(cgColor: p.plain.cgColor), lowland: UIColor(cgColor: p.lowland.cgColor), hill: UIColor(cgColor: p.hill.cgColor), mountain: UIColor(cgColor: p.mountain.cgColor), grid: UIColor(cgColor: p.grid.cgColor), contour: UIColor(cgColor: p.contour.cgColor), shoreline: UIColor(cgColor: p.shoreline.cgColor))
     }
-
     var roadPalette: RoadPalette {
-        switch self {
-        case .topographic: RoadPalette(motorway: UIColor.white, arterial: UIColor(red: 0.96, green: 0.83, blue: 0.28, alpha: 1), street: UIColor(red: 0.86, green: 0.93, blue: 0.82, alpha: 1), railway: UIColor(red: 0.28, green: 0.2, blue: 0.16, alpha: 1), casing: UIColor(red: 0.18, green: 0.25, blue: 0.22, alpha: 1))
-        case .planning: RoadPalette(motorway: UIColor(red: 0.94, green: 0.75, blue: 0.44, alpha: 1), arterial: UIColor(red: 0.99, green: 0.88, blue: 0.64, alpha: 1), street: UIColor(red: 1, green: 0.99, blue: 0.97, alpha: 1), railway: UIColor(red: 0.36, green: 0.37, blue: 0.35, alpha: 1), casing: UIColor(red: 0.66, green: 0.64, blue: 0.58, alpha: 1))
-        case .ink: RoadPalette(motorway: UIColor(red: 0.08, green: 0.09, blue: 0.1, alpha: 1), arterial: UIColor(red: 0.2, green: 0.22, blue: 0.23, alpha: 1), street: UIColor(red: 0.48, green: 0.5, blue: 0.5, alpha: 1), railway: UIColor.black, casing: UIColor.white)
-        case .coastal: RoadPalette(motorway: UIColor(red: 0.16, green: 0.3, blue: 0.36, alpha: 1), arterial: UIColor(red: 0.93, green: 0.52, blue: 0.22, alpha: 1), street: UIColor(red: 0.96, green: 0.88, blue: 0.62, alpha: 1), railway: UIColor(red: 0.35, green: 0.22, blue: 0.17, alpha: 1), casing: UIColor(red: 0.95, green: 0.92, blue: 0.78, alpha: 1))
-        case .midnight: RoadPalette(motorway: UIColor(red: 0.68, green: 0.84, blue: 0.95, alpha: 1), arterial: UIColor(red: 0.98, green: 0.7, blue: 0.31, alpha: 1), street: UIColor(red: 0.55, green: 0.72, blue: 0.72, alpha: 1), railway: UIColor(red: 0.78, green: 0.55, blue: 0.84, alpha: 1), casing: UIColor(red: 0.04, green: 0.08, blue: 0.13, alpha: 1))
-        case .forest: RoadPalette(motorway: UIColor(red: 0.23, green: 0.3, blue: 0.25, alpha: 1), arterial: UIColor(red: 0.77, green: 0.55, blue: 0.21, alpha: 1), street: UIColor(red: 0.87, green: 0.82, blue: 0.58, alpha: 1), railway: UIColor(red: 0.3, green: 0.19, blue: 0.14, alpha: 1), casing: UIColor(red: 0.7, green: 0.78, blue: 0.58, alpha: 1))
-        }
+        let p = palette
+        return RoadPalette(motorway: UIColor(cgColor: p.motorway.cgColor), arterial: UIColor(cgColor: p.arterial.cgColor), street: UIColor(cgColor: p.street.cgColor), railway: UIColor(cgColor: p.railway.cgColor), casing: UIColor(cgColor: p.roadCasing.cgColor))
     }
 }
 
@@ -2716,4 +2858,217 @@ private final class CanvasZoomAccessibilityElement: UIAccessibilityElement {
     var adjust: ((Bool) -> Void)?
     override func accessibilityIncrement() { adjust?(true) }
     override func accessibilityDecrement() { adjust?(false) }
+}
+
+/// MapKit owns camera movement, deceleration, scale and compass. The transparent
+/// canvas keeps the same road editing and persistence model as generated maps.
+final class RoadMapWorkspaceView: UIView, MKMapViewDelegate {
+    let canvas = RoadCanvasView()
+    var onViewportChanged: ((MapExportViewport) -> Void)?
+    private let map = MKMapView()
+    private var usesAppleMap = false
+    private var fittedCameraDistance = 0.0
+    private var awaitsFittedCamera = false
+    private var isSettlingCamera = false
+    private var lastZoomHintTime: CFTimeInterval = 0
+
+    private lazy var nativeCompass = MKCompassButton(mapView: map)
+    private lazy var nativeScale = MKScaleView(mapView: map)
+    private var displayedProjectID: UUID?
+    private var geographicBounds: GeoBounds?
+    private var worldMetersPerPoint = 1.0
+    private var needsInitialRegion = false
+    private lazy var editingTouches = MapEditingTouches(canvas: canvas)
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        map.delegate = self
+        map.isPitchEnabled = false
+        map.showsCompass = false
+        map.showsScale = false
+        map.preferredConfiguration = MKStandardMapConfiguration(elevationStyle: .flat)
+        map.accessibilityIdentifier = "native-map"
+        addSubview(map)
+        addSubview(canvas)
+        map.addGestureRecognizer(editingTouches)
+        addSubview(nativeCompass)
+        addSubview(nativeScale)
+        nativeCompass.compassVisibility = .visible
+        nativeCompass.accessibilityIdentifier = "native-map-compass"
+        nativeScale.scaleVisibility = .visible
+        nativeScale.accessibilityIdentifier = "native-map-scale"
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func update(project: RoadProject) {
+        usesAppleMap = project.realWorldMap?.source == .appleMaps
+        canvas.nativeMap = map
+        canvas.useNativeNavigation(true)
+        configureNativeNavigation(in: map)
+        // The generated world is opaque above the entire native map, including
+        // its unused basemap chrome. Apple projects expose the actual basemap.
+        if !map.overlays.isEmpty { map.removeOverlays(map.overlays) }
+        accessibilityElements = usesAppleMap
+            ? [map, canvas, nativeCompass, nativeScale] : [canvas, nativeCompass, nativeScale]
+        let area = project.realWorldMap?.bounds ?? Self.syntheticBounds(for: project.mapScale)
+        let targetScale = project.mapScale.metersPerPoint
+        if displayedProjectID != project.id || geographicBounds != area || worldMetersPerPoint != targetScale {
+            displayedProjectID = project.id
+            geographicBounds = area
+            worldMetersPerPoint = targetScale
+            needsInitialRegion = true
+        }
+        setNeedsLayout()
+        synchronizeCanvas()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        map.frame = bounds
+        canvas.frame = bounds
+        configureNativeNavigation(in: map)
+        let inset = safeAreaInsets
+        let controlsY = max(inset.top+180, bounds.height-inset.bottom-190)
+        nativeCompass.frame = CGRect(x: inset.left + 16, y: controlsY, width: 44, height: 44)
+        nativeScale.frame = CGRect(x: inset.left + 16, y: controlsY+54, width: 150, height: 36)
+        if needsInitialRegion, bounds.width > 0, bounds.height > 0, let area = geographicBounds {
+            needsInitialRegion = false
+            let center = CLLocationCoordinate2D(
+                latitude: (area.minLatitude + area.maxLatitude) / 2,
+                longitude: (area.minLongitude + area.maxLongitude) / 2
+            )
+            let region = MKCoordinateRegion(
+                center: center,
+                latitudinalMeters: worldMetersPerPoint * 1200,
+                longitudinalMeters: worldMetersPerPoint * 1600
+            )
+            let boundaryRegion = MKCoordinateRegion(
+                center: center,
+                latitudinalMeters: worldMetersPerPoint * 1200 * 1.8,
+                longitudinalMeters: worldMetersPerPoint * 1600 * 1.8
+            )
+            map.cameraBoundary = MKMapView.CameraBoundary(coordinateRegion: boundaryRegion)
+            map.cameraZoomRange = nil
+            fittedCameraDistance = 0
+            awaitsFittedCamera = true
+            map.setRegion(region, animated: false)
+        }
+        synchronizeCanvas()
+    }
+
+    private func configureNativeNavigation(in view: UIView) {
+        let editsWithFinger = canvas.allowsFingerDrawing || canvas.isSelecting || canvas.isEditingInterchange
+        for gesture in view.gestureRecognizers ?? [] {
+            if let pan = gesture as? UIPanGestureRecognizer {
+                pan.minimumNumberOfTouches = editsWithFinger ? 2 : 1
+                pan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+            } else if gesture is UIPinchGestureRecognizer || gesture is UIRotationGestureRecognizer {
+                gesture.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+            }
+        }
+        for child in view.subviews where child !== canvas {
+            configureNativeNavigation(in: child)
+        }
+    }
+
+    func mapViewDidChangeVisibleRegion(_ mapView: MKMapView) {
+        synchronizeCanvas()
+        guard fittedCameraDistance > 0, !isSettlingCamera else { return }
+        let distance = map.camera.centerCoordinateDistance
+        if (distance > fittedCameraDistance / 0.9 || distance < fittedCameraDistance / 7.95),
+           CACurrentMediaTime() - lastZoomHintTime > 2 {
+            lastZoomHintTime = CACurrentMediaTime()
+            canvas.showMinimumZoomHint(maximum: distance < fittedCameraDistance / 7.95)
+        }
+    }
+
+    func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
+        if awaitsFittedCamera {
+            awaitsFittedCamera = false
+            fittedCameraDistance = map.camera.centerCoordinateDistance
+            map.cameraZoomRange = MKMapView.CameraZoomRange(
+                minCenterCoordinateDistance: fittedCameraDistance / 8,
+                maxCenterCoordinateDistance: fittedCameraDistance / 0.84)
+            let camera = map.camera.copy() as! MKMapCamera
+            camera.centerCoordinateDistance = fittedCameraDistance / 1.2
+            map.setCamera(camera, animated: false)
+            synchronizeCanvas()
+            return
+        }
+        guard fittedCameraDistance > 0, !isSettlingCamera,
+              map.camera.centerCoordinateDistance > fittedCameraDistance / 0.9 else { return }
+        isSettlingCamera = true
+        let camera = map.camera.copy() as! MKMapCamera
+        camera.centerCoordinateDistance = fittedCameraDistance / 0.9
+        map.setCamera(camera, animated: !UIAccessibility.isReduceMotionEnabled)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.isSettlingCamera = false
+        }
+    }
+
+    private func coordinate(for point: RoadPoint, area: GeoBounds) -> CLLocationCoordinate2D {
+        let latitude = (area.minLatitude + area.maxLatitude) / 2
+        let center = MKMapPoint(CLLocationCoordinate2D(latitude: latitude,
+            longitude: (area.minLongitude + area.maxLongitude) / 2))
+        let scale = worldMetersPerPoint / MKMetersPerMapPointAtLatitude(latitude)
+        return MKMapPoint(x: center.x+(point.x-800)*scale, y: center.y+(point.y-600)*scale).coordinate
+    }
+
+    private func synchronizeCanvas() {
+        guard canvas.nativeMap != nil, let area = geographicBounds,
+              map.bounds.width > 0, map.bounds.height > 0 else { return }
+        let origin = map.convert(coordinate(for: RoadPoint(x: 0, y: 0), area: area), toPointTo: canvas)
+        let xAxis = map.convert(coordinate(for: RoadPoint(x: 1600, y: 0), area: area), toPointTo: canvas)
+        canvas.followNativeMap(origin: origin, xAxis: xAxis)
+        onViewportChanged?(canvas.exportViewport)
+    }
+
+    private static func syntheticBounds(for mapScale: MapScale) -> GeoBounds {
+        let dy = max(50, mapScale.heightMeters) / 2 / 111_195
+        let dx = max(50, mapScale.widthMeters) / 2 / 111_195
+        if let bounds = try? GeoBounds(
+            minLatitude: max(-80, -dy),
+            minLongitude: max(-180, -dx),
+            maxLatitude: min(80, dy),
+            maxLongitude: min(180, dx)
+        ) {
+            return bounds
+        }
+        return try! GeoBounds(minLatitude: -0.1, minLongitude: -0.1, maxLatitude: 0.1, maxLongitude: 0.1)
+    }
+}
+
+
+/// Observes editing input without competing with MapKit's native recognizers.
+/// The canvas cancels its provisional stroke as soon as a second finger arrives.
+private final class MapEditingTouches: UIGestureRecognizer {
+    private weak var canvas: RoadCanvasView?
+
+    init(canvas: RoadCanvasView) {
+        self.canvas = canvas
+        super.init(target: nil, action: nil)
+        cancelsTouchesInView = false
+        delaysTouchesBegan = false
+        delaysTouchesEnded = false
+    }
+
+    override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+    override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        canvas?.touchesBegan(touches, with: event)
+    }
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        canvas?.touchesMoved(touches, with: event)
+    }
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        canvas?.touchesEnded(touches, with: event)
+        if event.allTouches?.allSatisfy({ $0.phase == .ended || $0.phase == .cancelled }) == true { state = .failed }
+    }
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        canvas?.touchesCancelled(touches, with: event)
+        state = .failed
+    }
 }

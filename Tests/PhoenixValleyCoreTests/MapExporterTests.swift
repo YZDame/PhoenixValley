@@ -271,3 +271,50 @@ private func geographicExportProject() throws -> RoadProject {
     #expect(try shadedPixels(Array(repeating: 100, count: 9)) == 0)
     #expect(try shadedPixels([0,300,600,0,300,600,0,300,600]) > 0)
 }
+
+@Test func viewportExportsPreserveFrameAndClipRoadGeometry() throws {
+    let project = exportTestProject()
+    let view = MapExportViewport(camera: CanvasViewport(scale: 2, translation: .init(x: -1000, y: -800)), width: 800, height: 600)
+    let options = MapExportOptions(viewport: view, showsTitle: false, showsScale: false, showsInformation: false)
+    let png = try MapExporter.data(for: project, format: .png, options: options)
+    let source = try #require(CGImageSourceCreateWithData(png as CFData, nil))
+    let image = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+    #expect(image.width == 800)
+    #expect(image.height == 600)
+    let pdf = try MapExporter.data(for: project, format: .pdf, options: options)
+    let provider = try #require(CGDataProvider(data: pdf as CFData))
+    let page = try #require(CGPDFDocument(provider)?.page(at: 1))
+    #expect(page.getBoxRect(.mediaBox).size == CGSize(width: 800, height: 600))
+    let svg = try MapExporter.data(for: project, format: .svg, options: options)
+    #expect(XMLParser(data: svg).parse())
+    let text = String(decoding: svg, as: UTF8.self)
+    #expect(!text.contains("id=\"export-scale\""))
+    #expect(!text.contains(">Export &amp; Test</text>"))
+    let data = try MapExporter.data(for: project, format: .geoJSON, options: options)
+    let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    let features = try #require(object["features"] as? [[String: Any]])
+    let road = try #require(features.first { ($0["properties"] as? [String: Any])?["featureType"] as? String == "road" })
+    let geometry = try #require(road["geometry"] as? [String: Any])
+    let coordinates = try #require(geometry["coordinates"] as? [[Double]])
+    #expect(coordinates == [[1000, 1200], [1800, 1200]])
+
+    let hydroSummary = features.first { ($0["properties"] as? [String: Any])?["featureType"] as? String == "hydrologySummary" }
+    #expect(hydroSummary != nil)
+    #expect((hydroSummary?["properties"] as? [String: Any])?["scope"] as? String == "fullProject")
+
+    let viewOptionsWithInfo = MapExportOptions(viewport: view, showsTitle: true, showsScale: false, showsInformation: true)
+    let svgWithInfo = String(decoding: try MapExporter.data(for: project, format: .svg, options: viewOptionsWithInfo), as: UTF8.self)
+    #expect(svgWithInfo.contains("当前视野"))
+}
+
+@Test func exportOptionsControlTextAndRetainRequiredSource() throws {
+    let project = try geographicExportProject()
+    let options = MapExportOptions(showsTitle: false, showsScale: false, showsInformation: true, showsAttribution: false)
+    let svg = String(decoding: try MapExporter.data(for: project, format: .svg, options: options), as: UTF8.self)
+    #expect(!svg.contains(">Geographic</text>"))
+    #expect(!svg.contains("id=\"export-scale\""))
+    #expect(svg.contains("条道路</text>"))
+    #expect(svg.contains("© OpenStreetMap contributors"))
+    let full = try MapExporter.data(for: project, format: .geoJSON)
+    #expect(try MapExporter.data(for: project, format: .geoJSON, options: options) == full)
+}

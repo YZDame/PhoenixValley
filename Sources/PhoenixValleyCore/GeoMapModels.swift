@@ -1,6 +1,6 @@
 import Foundation
 
-public enum GeoImportFormat: String, Codable, Sendable { case osmXML, kml, esriASCII }
+public enum GeoImportFormat: String, Codable, Sendable { case osmXML, kml, esriASCII, appleMaps }
 
 public enum GeoImportError: Error, LocalizedError, Sendable {
     case invalid(String)
@@ -85,4 +85,19 @@ public struct RealWorldMap: Codable, Hashable, Sendable {
 public struct GeoImportResult: Sendable {
     public var project: RoadProject
     public var summary: GeoImportSummary
+}
+
+
+extension RoadProject {
+    /// An empty, georeferenced construction project; Apple supplies the live basemap.
+    public static func appleMap(name: String = "Apple 地图", bounds: GeoBounds? = nil) -> RoadProject {
+        let area = bounds ?? (try! GeoBounds.around(latitude: 25.034, longitude: 121.5645,
+                                                   widthMeters: 1600, heightMeters: 1200))
+        return RoadProject(name: name, terrain: TerrainLayout(seed: 0, shoreline: [], scenario: .continent),
+            showsContours: false, showsGrid: false, mapScale: MapScale(metersPerPoint: area.metersPerPoint),
+            realWorldMap: RealWorldMap(bounds: area, source: .appleMaps, attribution: "Apple Maps",
+                features: [], summary: GeoImportSummary(inputPointCount: 0, retainedPointCount: 0,
+                    roadCount: 0, featureCount: 0, simplificationMeters: 0,
+                    warnings: ["底图道路仅供参考；新建道路才参与编辑和立交连接。没有真实高程数据。"])))
+    }
 }
