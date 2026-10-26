@@ -61,7 +61,6 @@ The Swift package contains tests for stroke processing, topology, terrain genera
 PhoenixValleyApp/              Native iPadOS app target
 Sources/PhoenixValleyCore/     Road, terrain, topology, export, and planning logic
 Tests/PhoenixValleyCoreTests/  Core unit tests
-Tests/PhoenixValleyCoreSmoke/  Smoke test entry point
 Docs/                          Release, privacy, and App Store notes
 ```
 

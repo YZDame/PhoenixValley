@@ -86,7 +86,7 @@ final class RoadDocumentStore {
         } else {
             let terrain = Self.placeholderTerrain(seed: 20260722)
             let initialProject = RoadProject(name: "我的设计地图", terrain: terrain,
-                mapScale: MapScale(metersPerPoint: 20))
+                mapScale: MapScale(metersPerPoint: 62.5))
             project = initialProject
             projects = [initialProject]
             createdPlaceholder = true
@@ -256,10 +256,6 @@ final class RoadDocumentStore {
         }
         selectedInterchangeCrossingID = id
         pendingRampError = nil
-    }
-
-    func selectInterchangeCrossing(_ relation: RoadRelation?) {
-        selectInterchangeCrossing(id: relation?.id)
     }
 
     func createInterchangePracticeMap() {
@@ -546,10 +542,6 @@ final class RoadDocumentStore {
         }) {
             selectedInterchangeCrossingID = relation.id
         }
-    }
-
-    func selectRamp(_ id: UUID?) {
-        selectRamp(id: id)
     }
 
     @discardableResult

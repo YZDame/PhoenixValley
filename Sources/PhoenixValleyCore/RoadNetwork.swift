@@ -274,7 +274,7 @@ public enum TerrainScenario: String, CaseIterable, Codable, Hashable, Identifiab
 }
 
 public struct TerrainLayout: Codable, Hashable, Sendable {
-    public static let currentGenerationVersion = 8
+    public static let currentGenerationVersion = 9
 
     public var seed: UInt64
     public var shoreline: [RoadPoint]

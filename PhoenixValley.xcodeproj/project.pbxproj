@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F81000000000000000000008 /* FloatingToolPalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82000000000000000000008 /* FloatingToolPalette.swift */; };
+		F81000000000000000000007 /* MapContentThumbnail.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82000000000000000000007 /* MapContentThumbnail.swift */; };
+		F81000000000000000000006 /* MapAppearancePopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82000000000000000000006 /* MapAppearancePopover.swift */; };
+		F81000000000000000000005 /* RoadStructureReviewSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82000000000000000000005 /* RoadStructureReviewSheet.swift */; };
+		F81000000000000000000004 /* MapExportModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82000000000000000000004 /* MapExportModels.swift */; };
 		F81000000000000000000003 = {isa = PBXBuildFile; fileRef = F82000000000000000000003; };
 		F81000000000000000000002 = {isa = PBXBuildFile; fileRef = F82000000000000000000002; };
 		F81000000000000000000001 = {isa = PBXBuildFile; fileRef = F82000000000000000000001; };
@@ -28,6 +33,11 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		F82000000000000000000008 /* FloatingToolPalette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingToolPalette.swift; sourceTree = "<group>"; };
+		F82000000000000000000007 /* MapContentThumbnail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapContentThumbnail.swift; sourceTree = "<group>"; };
+		F82000000000000000000006 /* MapAppearancePopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapAppearancePopover.swift; sourceTree = "<group>"; };
+		F82000000000000000000005 /* RoadStructureReviewSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoadStructureReviewSheet.swift; sourceTree = "<group>"; };
+		F82000000000000000000004 /* MapExportModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapExportModels.swift; sourceTree = "<group>"; };
 		F82000000000000000000003 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapExportSheet.swift; sourceTree = "<group>"; };
 		F82000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapThemePicker.swift; sourceTree = "<group>"; };
 		F82000000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePaletteControls.swift; sourceTree = "<group>"; };
@@ -115,6 +125,11 @@
 				F82000000000000000000003 /* MapExportSheet.swift */,
 				F82000000000000000000002 /* MapThemePicker.swift */,
 				F82000000000000000000001 /* NativePaletteControls.swift */,
+				F82000000000000000000004 /* MapExportModels.swift */,
+				F82000000000000000000005 /* RoadStructureReviewSheet.swift */,
+				F82000000000000000000006 /* MapAppearancePopover.swift */,
+				F82000000000000000000007 /* MapContentThumbnail.swift */,
+				F82000000000000000000008 /* FloatingToolPalette.swift */,
 				A20000000000000000000003 /* RoadDocumentStore.swift */,
 				A2000000000000000000000B /* RoadSelectionInspector.swift */,
 				A2000000000000000000000C /* RoadInterchangeInspector.swift */,
@@ -253,6 +268,11 @@
 				F81000000000000000000003 /* MapExportSheet.swift in Sources */,
 				F81000000000000000000002 /* MapThemePicker.swift in Sources */,
 				F81000000000000000000001 /* NativePaletteControls.swift in Sources */,
+				F81000000000000000000004 /* MapExportModels.swift in Sources */,
+				F81000000000000000000005 /* RoadStructureReviewSheet.swift in Sources */,
+				F81000000000000000000006 /* MapAppearancePopover.swift in Sources */,
+				F81000000000000000000007 /* MapContentThumbnail.swift in Sources */,
+				F81000000000000000000008 /* FloatingToolPalette.swift in Sources */,
 				A10000000000000000000003 /* RoadDocumentStore.swift in Sources */,
 				A10000000000000000000004 /* ProjectFileStore.swift in Sources */,
 				A10000000000000000000005 /* RoadCanvasView.swift in Sources */,

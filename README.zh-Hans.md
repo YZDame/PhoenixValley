@@ -61,7 +61,6 @@ Swift Package 中已有针对笔迹处理、拓扑、地形生成、桥隧规划
 PhoenixValleyApp/              原生 iPadOS App target
 Sources/PhoenixValleyCore/     道路、地形、拓扑、导出和规划逻辑
 Tests/PhoenixValleyCoreTests/  核心单元测试
-Tests/PhoenixValleyCoreSmoke/  冒烟测试入口
 Docs/                          发布、隐私和 App Store 资料
 ```
 

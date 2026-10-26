@@ -11,8 +11,8 @@ public struct TerrainGenerationRequest: Hashable, Sendable {
     public init(
         seed: UInt64,
         vertexCount: Int = 96,
-        gridWidth: Int = 257,
-        gridHeight: Int = 193,
+        gridWidth: Int = 513,
+        gridHeight: Int = 385,
         scenario: TerrainScenario = .island
     ) {
         self.seed = seed
