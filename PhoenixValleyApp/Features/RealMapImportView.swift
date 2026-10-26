@@ -64,7 +64,12 @@ struct RealMapImportView: View {
                         Text("3.2 × 2.4 千米").tag(3200.0)
                     }
                     .accessibilityIdentifier("real-map-area")
-                    Button("使用 Apple 地图", systemImage: "map") {
+                    Button("下载并预览 OpenStreetMap", systemImage: "arrow.down.circle") {
+                        focusedField = nil
+                        loadOpenStreetMap()
+                    }
+                    .accessibilityIdentifier("real-map-download")
+                    Button("使用 Apple 地图底图", systemImage: "map") {
                         focusedField = nil
                         guard let lat = Double(latitude), let lon = Double(longitude) else {
                             phase = .failed("请输入有效的十进制经纬度。")

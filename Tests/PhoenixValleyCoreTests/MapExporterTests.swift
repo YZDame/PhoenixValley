@@ -297,6 +297,14 @@ private func geographicExportProject() throws -> RoadProject {
     let geometry = try #require(road["geometry"] as? [String: Any])
     let coordinates = try #require(geometry["coordinates"] as? [[Double]])
     #expect(coordinates == [[1000, 1200], [1800, 1200]])
+
+    let hydroSummary = features.first { ($0["properties"] as? [String: Any])?["featureType"] as? String == "hydrologySummary" }
+    #expect(hydroSummary != nil)
+    #expect((hydroSummary?["properties"] as? [String: Any])?["scope"] as? String == "fullProject")
+
+    let viewOptionsWithInfo = MapExportOptions(viewport: view, showsTitle: true, showsScale: false, showsInformation: true)
+    let svgWithInfo = String(decoding: try MapExporter.data(for: project, format: .svg, options: viewOptionsWithInfo), as: UTF8.self)
+    #expect(svgWithInfo.contains("当前视野"))
 }
 
 @Test func exportOptionsControlTextAndRetainRequiredSource() throws {

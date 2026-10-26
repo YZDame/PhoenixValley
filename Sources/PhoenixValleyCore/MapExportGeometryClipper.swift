@@ -72,7 +72,16 @@ enum MapExportGeometryClipper {
         }
         var kept: [[String: Any]] = []
         for var feature in object["features"] as? [[String: Any]] ?? [] {
-            guard var geometry = feature["geometry"] as? [String: Any], let type = geometry["type"] as? String else { continue }
+            guard var geometry = feature["geometry"] as? [String: Any], let type = geometry["type"] as? String else {
+                if feature["geometry"] is NSNull || feature["geometry"] == nil {
+                    if var properties = feature["properties"] as? [String: Any] {
+                        properties["scope"] = "fullProject"
+                        feature["properties"] = properties
+                    }
+                    kept.append(feature)
+                }
+                continue
+            }
             switch type {
             case "Point":
                 guard let point = geometry["coordinates"] as? [Double], point.count >= 2, inside(screen(point)) else { continue }

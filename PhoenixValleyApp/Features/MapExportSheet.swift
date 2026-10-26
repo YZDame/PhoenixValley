@@ -41,6 +41,13 @@ struct MapExportSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                if document.project.realWorldMap?.source == .appleMaps {
+                    Section {
+                        Label("Apple 地图底图仅供画布交互参考；导出文件仅包含用户绘制的路网与工程结构。", systemImage: "info.circle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Section {
                     VStack(spacing: 12) {
                         ZStack {
@@ -95,6 +102,9 @@ struct MapExportSheet: View {
                   footer: {
                     if format == .geoJSON { Text("GeoJSON 保存可编辑的地理数据，不包含文字排版与主题配色。") }
                     else if needsSource { Text("OpenStreetMap 数据导出保留来源署名。") }
+                    else if document.project.realWorldMap?.source == .appleMaps {
+                        Text("Apple 地图为在线交互底图，导出的图像与矢量文件仅包含用户创建的道路与工程结构。")
+                    }
                   }
                   .disabled(format == .geoJSON)
             }

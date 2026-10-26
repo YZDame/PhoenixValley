@@ -159,10 +159,12 @@ struct RoadInterchangeInspector: View {
             .font(.caption)
 
             directionPicker
-            Button("切换连接侧", systemImage: "arrow.triangle.2.circlepath") {
-                document.prepareQuickRamp(cycle: true)
+            if !document.isPendingRampHandDrawn {
+                Button("切换连接侧", systemImage: "arrow.triangle.2.circlepath") {
+                    document.prepareQuickRamp(cycle: true)
+                }
+                .accessibilityIdentifier("interchange-cycle-ramp")
             }
-            .accessibilityIdentifier("interchange-cycle-ramp")
 
             HStack {
                 Button("重画") {
