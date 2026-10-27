@@ -87,4 +87,28 @@ struct PaperPenAndRailwayTests {
         #expect(terrain.waterLevel > 0)
         #expect(!terrain.elevations.isEmpty)
     }
+
+    @Test("参考底图图层支持透明度、显隐与序列化持久化")
+    func referenceImageOverlaySerialization() throws {
+        var project = RoadProject(name: "底图测试")
+        #expect(project.referenceOverlay == nil)
+
+        let fakeData = Data([0x89, 0x50, 0x4E, 0x47])
+        let overlay = ReferenceImageOverlay(
+            imageName: "规划总图.png",
+            imageData: fakeData,
+            opacity: 0.65,
+            isVisible: true
+        )
+        project.referenceOverlay = overlay
+
+        let data = try JSONEncoder().encode(project)
+        let decoded = try JSONDecoder().decode(RoadProject.self, from: data)
+
+        #expect(decoded.referenceOverlay != nil)
+        #expect(decoded.referenceOverlay?.imageName == "规划总图.png")
+        #expect(decoded.referenceOverlay?.opacity == 0.65)
+        #expect(decoded.referenceOverlay?.isVisible == true)
+        #expect(decoded.referenceOverlay?.imageData == fakeData)
+    }
 }

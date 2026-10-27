@@ -48,6 +48,8 @@ final class RoadDocumentStore {
     private(set) var saveErrorMessage: String?
     private(set) var terrainGenerationState: TerrainGenerationState = .idle
 
+    @ObservationIgnored private var referenceOpacityEditStart: RoadProject?
+    @ObservationIgnored private var toolBeforeEraser: RoadEditorTool = .draw
     private var undoStack: [RoadProject] = []
     private var redoStack: [RoadProject] = []
     private let fileStore: ProjectFileStore
@@ -220,6 +222,19 @@ final class RoadDocumentStore {
         resetInterchangeEditingState()
     }
 
+    func toggleEraser() {
+        if activeTool == .erase {
+            switch toolBeforeEraser {
+            case .select: activateSelection()
+            case .interchange: activateInterchange()
+            case .draw, .erase: activateDrawing()
+            }
+        } else {
+            toolBeforeEraser = activeTool
+            activateEraser()
+        }
+    }
+
     func activateSelection() {
         activeTool = .select
         resetInterchangeEditingState()
@@ -238,6 +253,64 @@ final class RoadDocumentStore {
 
     func clearRoadSelection() {
         selectedSourceRoadIDs.removeAll()
+    }
+
+    func setReferenceOverlay(
+        imageName: String,
+        imageData: Data,
+        bounds: [Double] = [0, 0, 1600, 1200]
+    ) {
+        commitReferenceOverlayOpacityEdit()
+        guard !imageData.isEmpty, imageData.count <= 10_000_000 else {
+            saveErrorMessage = "参考图片为空或超过 10 MB，请导入压缩后的图片。"
+            return
+        }
+        applyProjectEdit { project in
+            project.referenceOverlay = ReferenceImageOverlay(
+                imageName: imageName,
+                imageData: imageData,
+                opacity: 0.5,
+                isVisible: true,
+                bounds: bounds
+            )
+        }
+    }
+
+    /// Update the live canvas without writing the entire image and project on every slider tick.
+    func updateReferenceOverlayOpacity(_ opacity: Double) {
+        guard opacity.isFinite, var overlay = project.referenceOverlay else { return }
+        let next = min(1.0, max(0.1, opacity))
+        guard overlay.opacity != next else { return }
+        if referenceOpacityEditStart == nil { referenceOpacityEditStart = project }
+        overlay.opacity = next
+        project.referenceOverlay = overlay
+    }
+
+    /// Commit one undoable edit after the drag ends (also used before switching projects).
+    func commitReferenceOverlayOpacityEdit() {
+        guard let original = referenceOpacityEditStart else { return }
+        referenceOpacityEditStart = nil
+        var candidate = project
+        project = original
+        guard candidate.referenceOverlay != original.referenceOverlay else { return }
+        candidate.updatedAt = .now
+        _ = commitPersistedCandidate(candidate)
+    }
+
+    func toggleReferenceOverlayVisibility() {
+        commitReferenceOverlayOpacityEdit()
+        guard project.referenceOverlay != nil else { return }
+        applyProjectEdit { project in
+            project.referenceOverlay?.isVisible.toggle()
+        }
+    }
+
+    func removeReferenceOverlay() {
+        commitReferenceOverlayOpacityEdit()
+        guard project.referenceOverlay != nil else { return }
+        applyProjectEdit { project in
+            project.referenceOverlay = nil
+        }
     }
 
     func selectInterchangeCrossing(id: UUID?) {
@@ -1213,6 +1286,7 @@ final class RoadDocumentStore {
     }
 
     func undo() {
+        commitReferenceOverlayOpacityEdit()
         guard let previous = undoStack.last else { return }
         do {
             try fileStore.save(previous)
@@ -1228,6 +1302,7 @@ final class RoadDocumentStore {
     }
 
     func redo() {
+        commitReferenceOverlayOpacityEdit()
         guard let next = redoStack.last else { return }
         do {
             try fileStore.save(next)
@@ -1290,7 +1365,9 @@ final class RoadDocumentStore {
     }
 
     func selectProject(id: UUID) {
-        guard id != project.id, let selected = projects.first(where: { $0.id == id }) else { return }
+        guard id != project.id, projects.contains(where: { $0.id == id }) else { return }
+        commitReferenceOverlayOpacityEdit()
+        guard let selected = projects.first(where: { $0.id == id }) else { return }
         cancelTerrainGeneration()
         project = selected
         clearRoadSelection()
@@ -1321,6 +1398,7 @@ final class RoadDocumentStore {
     }
 
     func duplicateCurrentProject() {
+        commitReferenceOverlayOpacityEdit()
         let copy = RoadProject(
             name: "\(project.name) 副本",
             terrain: project.terrain,
@@ -1336,7 +1414,8 @@ final class RoadDocumentStore {
             layerVisibility: project.layerVisibility,
             mapScale: project.mapScale,
             groupID: project.groupID,
-            realWorldMap: project.realWorldMap
+            realWorldMap: project.realWorldMap,
+            referenceOverlay: project.referenceOverlay
         )
         project = copy
         projects.append(copy)
@@ -1347,6 +1426,7 @@ final class RoadDocumentStore {
     }
 
     func deleteCurrentProject() {
+        commitReferenceOverlayOpacityEdit()
         cancelTerrainGeneration()
         let deleted = project
         do {
