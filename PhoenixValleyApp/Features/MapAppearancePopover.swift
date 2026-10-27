@@ -345,9 +345,12 @@ struct MapAppearancePopover: View {
                     if !Task.isCancelled { referenceImportError = "无法读取所选图片。" }
                     return
                 }
-                guard !Task.isCancelled,
-                      document.project.id == targetProjectID,
-                      selectedPhotoItem == newItem else { return }
+                guard !Task.isCancelled, selectedPhotoItem == newItem else { return }
+                guard document.project.id == targetProjectID else {
+                    // Clear stale selection so the same photo can be chosen in another project.
+                    selectedPhotoItem = nil
+                    return
+                }
                 guard let normalized = Self.prepareReferenceImage(data) else {
                     referenceImportError = "无法处理图片，请尝试较小的 JPEG 或 PNG 图片。"
                     selectedPhotoItem = nil
