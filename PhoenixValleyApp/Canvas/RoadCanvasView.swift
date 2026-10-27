@@ -34,7 +34,6 @@ struct RoadCanvasRepresentable: UIViewRepresentable {
     let onInterchangeCrossingSelected: (UUID?) -> Void
     let onRampSelected: (UUID?) -> Void
     var onStationSelected: ((UUID?) -> Void)? = nil
-    var onToggleEraser: (() -> Void)? = nil
 
     func makeUIView(context: Context) -> RoadMapWorkspaceView {
         let workspace = RoadMapWorkspaceView()
@@ -48,7 +47,6 @@ struct RoadCanvasRepresentable: UIViewRepresentable {
         view.onInterchangeCrossingSelected = onInterchangeCrossingSelected
         view.onRampSelected = onRampSelected
         view.onStationSelected = onStationSelected
-        view.onToggleEraser = onToggleEraser
         return workspace
     }
 
@@ -152,7 +150,6 @@ struct RoadCanvasRepresentable: UIViewRepresentable {
         view.onInterchangeCrossingSelected = onInterchangeCrossingSelected
         view.onRampSelected = onRampSelected
         view.onStationSelected = onStationSelected
-        view.onToggleEraser = onToggleEraser
         workspace.update(project: project)
         view.refreshAccessibilityElements()
         view.setNeedsDisplay()
@@ -345,7 +342,6 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
     var onInterchangeCrossingSelected: ((UUID?) -> Void)?
     var onRampSelected: ((UUID?) -> Void)?
     var onStationSelected: ((UUID?) -> Void)?
-    var onToggleEraser: (() -> Void)?
 
     private var hoverGesture: UIHoverGestureRecognizer?
     private var hoverLocation: CGPoint?
@@ -459,10 +455,6 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         ]
         addGestureRecognizer(hover)
         hoverGesture = hover
-
-        let pencilInteraction = UIPencilInteraction()
-        pencilInteraction.delegate = self
-        addInteraction(pencilInteraction)
 
         compass.addTarget(self, action: #selector(resetNorth), for: .touchUpInside)
         compass.accessibilityIdentifier = "canvas-compass"
@@ -3452,8 +3444,3 @@ private final class MapEditingTouches: UIGestureRecognizer {
     }
 }
 
-extension RoadCanvasView: UIPencilInteractionDelegate {
-    func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
-        onToggleEraser?()
-    }
-}
