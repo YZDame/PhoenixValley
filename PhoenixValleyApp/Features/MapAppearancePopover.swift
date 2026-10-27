@@ -1,7 +1,9 @@
 import Foundation
+import ImageIO
 import PhoenixValleyCore
 import PhotosUI
 import SwiftUI
+import UIKit
 
 struct MapAppearanceButton: View {
     @Binding var isPresented: Bool
@@ -51,6 +53,8 @@ struct MapAppearancePopover: View {
     @Binding var enablesAdvancedEngineeringAnalysis: Bool
     @Binding var showsConstructionIssueOverlay: Bool
     @State private var selectedPhotoItem: PhotosPickerItem? = nil
+    @State private var photoLoadTask: Task<Void, Never>?
+    @State private var referenceImportError: String?
 
     var body: some View {
         let constructionIssues = document.constructionIssues
@@ -290,7 +294,10 @@ struct MapAppearancePopover: View {
                             set: { document.updateReferenceOverlayOpacity($0) }
                         ),
                         in: 0.1...1.0,
-                        step: 0.05
+                        step: 0.05,
+                        onEditingChanged: { editing in
+                            if !editing { document.commitReferenceOverlayOpacityEdit() }
+                        }
                     )
                 }
 
@@ -321,18 +328,69 @@ struct MapAppearancePopover: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            if let referenceImportError {
+                Text(referenceImportError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
         }
         .font(.subheadline)
         .onChange(of: selectedPhotoItem) { _, newItem in
-            Task {
-                guard let newItem,
-                      let data = try? await newItem.loadTransferable(type: Data.self) else { return }
-                await MainActor.run {
-                    document.setReferenceOverlay(imageName: "参考底图", imageData: data)
-                    selectedPhotoItem = nil
+            photoLoadTask?.cancel()
+            guard let newItem else { return }
+            referenceImportError = nil
+            let targetProjectID = document.project.id
+            photoLoadTask = Task {
+                guard let data = try? await newItem.loadTransferable(type: Data.self) else {
+                    if !Task.isCancelled { referenceImportError = "无法读取所选图片。" }
+                    return
                 }
+                guard !Task.isCancelled,
+                      document.project.id == targetProjectID,
+                      selectedPhotoItem == newItem else { return }
+                guard let normalized = Self.prepareReferenceImage(data) else {
+                    referenceImportError = "无法处理图片，请尝试较小的 JPEG 或 PNG 图片。"
+                    selectedPhotoItem = nil
+                    return
+                }
+                document.setReferenceOverlay(
+                    imageName: "参考底图",
+                    imageData: normalized.data,
+                    bounds: normalized.bounds
+                )
+                selectedPhotoItem = nil
             }
         }
+    }
+
+    /// Downsample before persisting; preserve transparency in planning drawings.
+    /// Center the image without stretching its aspect ratio.
+    private static func prepareReferenceImage(_ data: Data) -> (data: Data, bounds: [Double])? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 2800,
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary),
+              image.width > 0, image.height > 0 else { return nil }
+        let width = Double(image.width), height = Double(image.height)
+        let scale = min(1600.0 / width, 1200.0 / height)
+        let fittedWidth = width * scale, fittedHeight = height * scale
+        let alpha = image.alphaInfo
+        let preservesAlpha: Bool = [
+            CGImageAlphaInfo.first, .last, .premultipliedFirst, .premultipliedLast
+        ].contains(alpha)
+        let bitmap = UIImage(cgImage: image)
+        guard let compactData = preservesAlpha
+            ? bitmap.pngData()
+            : bitmap.jpegData(compressionQuality: 0.82),
+              compactData.count <= 10_000_000 else { return nil }
+        return (
+            compactData,
+            [(1600.0 - fittedWidth) / 2, (1200.0 - fittedHeight) / 2, fittedWidth, fittedHeight]
+        )
     }
 
     private var terrainSelection: Binding<Bool> {
