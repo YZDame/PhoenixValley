@@ -511,9 +511,6 @@ private struct RoadCanvasWorkspace: View {
             },
             onStationSelected: { id in
                 document.selectStation(id: id)
-            },
-            onToggleEraser: {
-                document.toggleEraser()
             }
         )
         .applyPencilGestures(
