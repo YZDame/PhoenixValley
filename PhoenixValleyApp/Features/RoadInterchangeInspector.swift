@@ -8,12 +8,43 @@ struct RoadInterchangeInspector: View {
         VStack(alignment: .leading, spacing: 12) {
             header
             Divider()
+            templateSection
+            Divider()
             content
         }
         .frame(width: 300, alignment: .leading)
         .padding(14)
         .modifier(InterchangeInspectorSurface())
         .accessibilityElement(children: .contain)
+    }
+
+    private var templateSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("常用模组", systemImage: "square.grid.2x2")
+                .font(.subheadline.weight(.semibold))
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(InterchangeTemplate.allTemplates) { template in
+                        Button {
+                            document.applyInterchangeTemplate(template)
+                        } label: {
+                            VStack(spacing: 4) {
+                                Image(systemName: template.iconName)
+                                    .font(.system(size: 16))
+                                Text(template.name)
+                                    .font(.caption2.weight(.medium))
+                                    .lineLimit(1)
+                            }
+                            .frame(width: 74, height: 52)
+                            .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("template-\(template.id)")
+                    }
+                }
+            }
+        }
     }
 
     private var header: some View {

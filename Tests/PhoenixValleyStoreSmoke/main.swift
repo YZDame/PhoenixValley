@@ -175,9 +175,9 @@ func verifyDefaultScale() throws {
     let manager = TemporaryFileManager(root: root)
     let files = ProjectFileStore(fileManager: manager)
     let store = RoadDocumentStore(fileStore: files)
-    try check(store.project.mapScale.metersPerPoint == 20, "first placeholder project uses 20 meters per point")
+    try check(store.project.mapScale.metersPerPoint == 62.5, "first placeholder project uses 62.5 meters per point")
     store.deleteCurrentProject()
-    try check(store.project.mapScale.metersPerPoint == 20, "recreated project uses 20 meters per point")
+    try check(store.project.mapScale.metersPerPoint == 62.5, "recreated project uses 62.5 meters per point")
     print("PASS default map scale consistency")
 }
 

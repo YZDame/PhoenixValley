@@ -274,7 +274,7 @@ public enum TerrainScenario: String, CaseIterable, Codable, Hashable, Identifiab
 }
 
 public struct TerrainLayout: Codable, Hashable, Sendable {
-    public static let currentGenerationVersion = 9
+    public static let currentGenerationVersion = 10
 
     public var seed: UInt64
     public var shoreline: [RoadPoint]
@@ -352,8 +352,27 @@ public struct TerrainLayout: Codable, Hashable, Sendable {
     }
 }
 
+public struct RailwayStation: Identifiable, Codable, Hashable, Sendable {
+    public let id: UUID
+    public var name: String
+    public var point: RoadPoint
+    public var sourceRoadID: UUID?
+
+    public init(
+        id: UUID = UUID(),
+        name: String = "火车站",
+        point: RoadPoint,
+        sourceRoadID: UUID? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.point = point
+        self.sourceRoadID = sourceRoadID
+    }
+}
+
 public struct RoadProject: Identifiable, Codable, Hashable, Sendable {
-    public static let currentFormatVersion = 13
+    public static let currentFormatVersion = 14
 
     public let id: UUID
     public var formatVersion: Int
@@ -366,6 +385,7 @@ public struct RoadProject: Identifiable, Codable, Hashable, Sendable {
     public var trafficRules: RoadTrafficRuleSet
     public var structureReviews: [RoadStructureReviewRecord]
     public var engineeringStructures: [RoadEngineeringStructure]
+    public var railwayStations: [RailwayStation]
     public var theme: MapTheme
     public var showsContours: Bool
     public var showsGrid: Bool
@@ -386,6 +406,7 @@ public struct RoadProject: Identifiable, Codable, Hashable, Sendable {
         trafficRules: RoadTrafficRuleSet = .init(),
         structureReviews: [RoadStructureReviewRecord] = [],
         engineeringStructures: [RoadEngineeringStructure] = [],
+        railwayStations: [RailwayStation] = [],
         theme: MapTheme = .planning,
         showsContours: Bool = true,
         showsGrid: Bool = true,
@@ -408,6 +429,7 @@ public struct RoadProject: Identifiable, Codable, Hashable, Sendable {
         ).network
         self.structureReviews = structureReviews
         self.engineeringStructures = engineeringStructures
+        self.railwayStations = railwayStations
         self.theme = theme
         self.showsContours = showsContours
         self.showsGrid = showsGrid
@@ -430,7 +452,7 @@ public struct RoadProject: Identifiable, Codable, Hashable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case id, formatVersion, name, createdAt, updatedAt, terrain, roads
         case roadNetwork, interchanges, trafficRules
-        case structureReviews, engineeringStructures
+        case structureReviews, engineeringStructures, railwayStations
         case theme, showsContours, showsGrid
         case layerVisibility, mapScale, groupID, realWorldMap
     }
@@ -480,6 +502,10 @@ public struct RoadProject: Identifiable, Codable, Hashable, Sendable {
             [RoadEngineeringStructure].self,
             forKey: .engineeringStructures
         ) ?? []
+        railwayStations = try values.decodeIfPresent(
+            [RailwayStation].self,
+            forKey: .railwayStations
+        ) ?? []
         theme = try values.decodeIfPresent(MapTheme.self, forKey: .theme) ?? .planning
         showsContours = try values.decodeIfPresent(Bool.self, forKey: .showsContours) ?? true
         showsGrid = try values.decodeIfPresent(Bool.self, forKey: .showsGrid) ?? true
@@ -509,6 +535,7 @@ public struct RoadProject: Identifiable, Codable, Hashable, Sendable {
         try values.encode(trafficRules, forKey: .trafficRules)
         try values.encode(structureReviews, forKey: .structureReviews)
         try values.encode(engineeringStructures, forKey: .engineeringStructures)
+        try values.encode(railwayStations, forKey: .railwayStations)
         try values.encode(theme, forKey: .theme)
         try values.encode(showsContours, forKey: .showsContours)
         try values.encode(showsGrid, forKey: .showsGrid)

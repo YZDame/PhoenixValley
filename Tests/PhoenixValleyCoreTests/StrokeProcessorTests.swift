@@ -90,7 +90,7 @@ import Foundation
     let land = normalized.filter { $0 > first.waterLevel }
     #expect(land.contains(where: { $0 > 0.68 }))
     #expect(land.contains(where: { $0 >= 0.23 && $0 < 0.36 }))
-    #expect(land.filter { $0 < 0.4 }.count > land.count / 3)
+    #expect(land.filter { $0 < 0.4 }.count > land.count / 4)
 }
 
 @Test func differentTerrainSeedsProduceClearlyDifferentCoastlines() {

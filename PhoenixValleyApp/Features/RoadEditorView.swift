@@ -86,7 +86,7 @@ private struct ProjectSidebar: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Menu("新建地图", systemImage: "doc.badge.plus") {
-                        Button("空白地图 · 32 × 24 千米", systemImage: "play.fill") {
+                        Button("空白地图 · 100 × 75 千米", systemImage: "play.fill") {
                             document.createNewMap()
                         }
                         Divider()
@@ -472,6 +472,7 @@ private struct RoadCanvasWorkspace: View {
             selectedInterchangeCrossingID: document.selectedInterchangeCrossingID,
             selectedRampID: document.selectedRampID,
             selectedSourceRoadIDs: document.selectedSourceRoadIDs,
+            selectedStationID: document.selectedStationID,
             onStrokeFinished: { points in
                 if document.isEditingInterchange,
                    document.isAwaitingRampDrawing {
@@ -507,6 +508,9 @@ private struct RoadCanvasWorkspace: View {
             },
             onRampSelected: { id in
                 document.selectRamp(id: id)
+            },
+            onStationSelected: { id in
+                document.selectStation(id: id)
             }
         )
         .ignoresSafeArea()
@@ -518,6 +522,11 @@ private struct RoadCanvasWorkspace: View {
         .overlay(alignment: .topTrailing) {
             if document.isEditingInterchange {
                 RoadInterchangeInspector(document: document)
+                    .padding(.top, 12)
+                    .padding(.trailing, 16)
+            } else if let stationID = document.selectedStationID,
+                      let station = document.project.railwayStations.first(where: { $0.id == stationID }) {
+                RailwayStationInspector(station: station, document: document)
                     .padding(.top, 12)
                     .padding(.trailing, 16)
             } else if document.isSelecting,

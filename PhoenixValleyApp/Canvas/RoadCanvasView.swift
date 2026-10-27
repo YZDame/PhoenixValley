@@ -20,6 +20,7 @@ struct RoadCanvasRepresentable: UIViewRepresentable {
     let selectedInterchangeCrossingID: UUID?
     let selectedRampID: UUID?
     let selectedSourceRoadIDs: Set<UUID>
+    var selectedStationID: UUID? = nil
     let onStrokeFinished: ([RoadPoint]) -> Void
     let onEraseFinished: (RoadEraseRequest) -> Void
     let onSelectionChanged: (Set<UUID>) -> Void
@@ -32,6 +33,7 @@ struct RoadCanvasRepresentable: UIViewRepresentable {
     ) -> Void
     let onInterchangeCrossingSelected: (UUID?) -> Void
     let onRampSelected: (UUID?) -> Void
+    var onStationSelected: ((UUID?) -> Void)? = nil
 
     func makeUIView(context: Context) -> RoadMapWorkspaceView {
         let workspace = RoadMapWorkspaceView()
@@ -44,6 +46,7 @@ struct RoadCanvasRepresentable: UIViewRepresentable {
         view.onControlPointMoved = onControlPointMoved
         view.onInterchangeCrossingSelected = onInterchangeCrossingSelected
         view.onRampSelected = onRampSelected
+        view.onStationSelected = onStationSelected
         return workspace
     }
 
@@ -125,6 +128,8 @@ struct RoadCanvasRepresentable: UIViewRepresentable {
         view.selectedInterchangeCrossingID = selectedInterchangeCrossingID
         view.selectedRampID = selectedRampID
         view.selectedSourceRoadIDs = selectedSourceRoadIDs
+        view.railwayStations = project.railwayStations
+        view.selectedStationID = selectedStationID
         view.mapScale = project.mapScale
         view.accessibilityValue = [
             project.name,
@@ -143,6 +148,7 @@ struct RoadCanvasRepresentable: UIViewRepresentable {
         view.onControlPointMoved = onControlPointMoved
         view.onInterchangeCrossingSelected = onInterchangeCrossingSelected
         view.onRampSelected = onRampSelected
+        view.onStationSelected = onStationSelected
         workspace.update(project: project)
         view.refreshAccessibilityElements()
         view.setNeedsDisplay()
@@ -151,6 +157,7 @@ struct RoadCanvasRepresentable: UIViewRepresentable {
 
 final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
     private enum SelectionHit {
+        case station(id: UUID)
         case controlPoint(sourceRoadID: UUID, point: RoadPoint)
         case selectedRoad(sourceRoadID: UUID)
         case unselectedRoad(sourceRoadID: UUID)
@@ -190,10 +197,10 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
     }
 
     var terrain = TerrainGenerator.generate(seed: 1) {
-        didSet { if oldValue != terrain { terrainDrawing = nil; elevationPaths = nil; waterPaths = nil } }
+        didSet { if oldValue != terrain { cachedTerrainImage = nil; elevationPaths = nil; waterPaths = nil } }
     }
     var realWorldMap: RealWorldMap? {
-        didSet { if oldValue != realWorldMap { terrainDrawing = nil } }
+        didSet { if oldValue != realWorldMap { cachedTerrainImage = nil } }
     }
     var roads: [RoadSegment] = []
     var constructionIssues: [RoadConstructionIssue] = []
@@ -253,7 +260,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         }
     }
     var mapScale: MapScale = .standard {
-        didSet { if oldValue != mapScale { terrainDrawing = nil } }
+        didSet { if oldValue != mapScale { cachedTerrainImage = nil } }
     }
     var theme: MapTheme = .planning {
         didSet { if oldValue != theme { transitionTerrain() } }
@@ -271,6 +278,18 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
     var showsGrid = true {
         didSet { if oldValue != showsGrid { transitionTerrain() } }
     }
+    var railwayStations: [RailwayStation] = [] {
+        didSet {
+            guard oldValue != railwayStations else { return }
+            setNeedsDisplay()
+        }
+    }
+    var selectedStationID: UUID? {
+        didSet {
+            guard oldValue != selectedStationID else { return }
+            setNeedsDisplay()
+        }
+    }
     var onStrokeFinished: (([RoadPoint]) -> Void)?
     var onEraseFinished: ((RoadEraseRequest) -> Void)?
     var onSelectionChanged: ((Set<UUID>) -> Void)?
@@ -283,6 +302,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
     ) -> Void)?
     var onInterchangeCrossingSelected: ((UUID?) -> Void)?
     var onRampSelected: ((UUID?) -> Void)?
+    var onStationSelected: ((UUID?) -> Void)?
 
     private var activeStroke: [RoadPoint] = []
     private var selectionInteraction: SelectionInteraction = .idle
@@ -303,7 +323,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
     private var northResetRotation: Double = 0
     private var isRotating = false
     private var hasPositionedInitialMap = false
-    private var terrainDrawing: CGPDFDocument?
+    private var cachedTerrainImage: CGImage?
     private var elevationPaths: [Int: CGMutablePath]?
     private var waterPaths: [CGMutablePath]?
     private weak var panGesture: UIPanGestureRecognizer?
@@ -448,8 +468,8 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         if realWorldMap?.source != .appleMaps {
         context.setFillColor(
             (
-                showsTerrain && realWorldMap == nil && terrain.scenario.hasOceanBoundary
-                    ? palette.water
+                showsTerrain && realWorldMap == nil
+                    ? (terrain.scenario.hasOceanBoundary ? palette.water : palette.plain)
                     : UIColor.systemBackground
             ).cgColor
         )
@@ -482,6 +502,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         )
         drawRoads(in: context)
         drawInterchanges(in: context)
+        drawRailwayStations(in: context)
         drawStructureCandidatePreview(in: context)
         drawConstructionIssues(in: context)
         drawTunnelPortals(
@@ -578,6 +599,15 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
                     mode: eraserMode
                 )
             )
+        } else if !isSelecting && !isEditingInterchange {
+            let strokeDist = completedStroke.indices.dropFirst().reduce(0.0) { sum, idx in
+                sum + hypot(completedStroke[idx].x - completedStroke[idx - 1].x, completedStroke[idx].y - completedStroke[idx - 1].y)
+            }
+            if strokeDist < 8, let station = nearestStation(to: completedStroke[0], isPencil: touch.type == .pencil) {
+                onStationSelected?(station.id == selectedStationID ? nil : station.id)
+                return
+            }
+            onStrokeFinished?(completedStroke)
         } else {
             onStrokeFinished?(completedStroke)
         }
@@ -996,7 +1026,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
                     current: clampedCanvasPoint(canvasPoint)
                 )
 
-            case .unselectedRoad:
+            case .unselectedRoad, .station:
                 selectionInteraction = .pending(pending)
             }
 
@@ -1042,10 +1072,18 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
             guard !pending.exceededDragThreshold else { return }
             var selection = selectedSourceRoadIDs
             switch pending.hit {
+            case let .station(stationID):
+                if selectedStationID == stationID {
+                    onStationSelected?(nil)
+                } else {
+                    onStationSelected?(stationID)
+                }
+                return
             case .controlPoint:
                 return
             case let .selectedRoad(sourceRoadID),
                  let .unselectedRoad(sourceRoadID):
+                onStationSelected?(nil)
                 if selection.contains(sourceRoadID) {
                     selection.remove(sourceRoadID)
                 } else {
@@ -1053,6 +1091,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
                 }
             case .empty:
                 selection.removeAll()
+                onStationSelected?(nil)
             }
             publishSelection(selection)
 
@@ -1184,6 +1223,10 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         let isPencil = touch.type == .pencil
         let maximumDistanceMeters = hitRadiusMeters(isPencil: isPencil)
 
+        if let station = nearestStation(to: canvasPoint, isPencil: isPencil) {
+            return .station(id: station.id)
+        }
+
         if selectedSourceRoadIDs.count == 1,
            let sourceRoadID = selectedSourceRoadIDs.first,
            let controlPoint = nearestVisibleControlPoint(
@@ -1208,6 +1251,21 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         return selectedSourceRoadIDs.contains(road.sourceRoadID)
             ? .selectedRoad(sourceRoadID: road.sourceRoadID)
             : .unselectedRoad(sourceRoadID: road.sourceRoadID)
+    }
+
+    private func nearestStation(to canvasPoint: RoadPoint, isPencil: Bool) -> RailwayStation? {
+        let screenRadius: CGFloat = isPencil ? 20 : 30
+        let maxCanvasDistance = Double(screenRadius / zoomScale)
+        var nearest: RailwayStation?
+        var bestDist = maxCanvasDistance
+        for station in railwayStations {
+            let dist = hypot(station.point.x - canvasPoint.x, station.point.y - canvasPoint.y)
+            if dist < bestDist {
+                bestDist = dist
+                nearest = station
+            }
+        }
+        return nearest
     }
 
     private func hitRadiusMeters(isPencil: Bool) -> Double {
@@ -1590,7 +1648,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
     }
 
     private func transitionTerrain() {
-        terrainDrawing = nil
+        cachedTerrainImage = nil
         guard !UIAccessibility.isReduceMotionEnabled else { return }
         let transition = CATransition()
         transition.type = .fade
@@ -1599,20 +1657,19 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
     }
 
     private func drawTerrain(in context: CGContext) {
-        if terrainDrawing == nil {
-            let data = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 1600, height: 1200)).pdfData { renderer in
-                renderer.beginPage()
-                drawTerrainContent(in: renderer.cgContext)
+        if cachedTerrainImage == nil {
+            let bounds = CGRect(x: 0, y: 0, width: 1600, height: 1200)
+            let renderer = UIGraphicsImageRenderer(bounds: bounds)
+            let image = renderer.image { rendererContext in
+                drawTerrainContent(in: rendererContext.cgContext)
             }
-            if let provider = CGDataProvider(data: data as CFData) {
-                terrainDrawing = CGPDFDocument(provider)
-            }
+            cachedTerrainImage = image.cgImage
         }
-        guard let page = terrainDrawing?.page(at: 1) else { return }
+        guard let cachedTerrainImage else { return }
         context.saveGState()
         context.translateBy(x: 0, y: 1200)
         context.scaleBy(x: 1, y: -1)
-        context.drawPDFPage(page)
+        context.draw(cachedTerrainImage, in: CGRect(x: 0, y: 0, width: 1600, height: 1200))
         context.restoreGState()
     }
 
@@ -1638,6 +1695,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
                 drawWatershedBoundaries(in: context, color: palette.watershed)
             }
             context.restoreGState()
+            drawTerrainEdgeFade(in: context, fadeColor: palette.plain)
             return
         }
 
@@ -1678,6 +1736,50 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         context.setLineWidth(1.2)
         context.addPath(shorePath)
         context.strokePath()
+        drawTerrainEdgeFade(in: context, fadeColor: palette.water)
+    }
+
+    private func drawTerrainEdgeFade(in context: CGContext, fadeColor: UIColor) {
+        let fadeWidth: CGFloat = 80
+        context.saveGState()
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        fadeColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        let edgeColor = CGColor(red: red, green: green, blue: blue, alpha: 0.95)
+        let clearColor = CGColor(red: red, green: green, blue: blue, alpha: 0.0)
+        guard let gradient = CGGradient(
+            colorsSpace: CGColorSpaceCreateDeviceRGB(),
+            colors: [edgeColor, clearColor] as CFArray,
+            locations: [0, 1]
+        ) else {
+            context.restoreGState()
+            return
+        }
+
+        // Top edge
+        context.saveGState()
+        context.clip(to: CGRect(x: 0, y: 0, width: 1600, height: fadeWidth))
+        context.drawLinearGradient(gradient, start: CGPoint(x: 800, y: 0), end: CGPoint(x: 800, y: fadeWidth), options: [])
+        context.restoreGState()
+
+        // Bottom edge
+        context.saveGState()
+        context.clip(to: CGRect(x: 0, y: 1200 - fadeWidth, width: 1600, height: fadeWidth))
+        context.drawLinearGradient(gradient, start: CGPoint(x: 800, y: 1200), end: CGPoint(x: 800, y: 1200 - fadeWidth), options: [])
+        context.restoreGState()
+
+        // Left edge
+        context.saveGState()
+        context.clip(to: CGRect(x: 0, y: 0, width: fadeWidth, height: 1200))
+        context.drawLinearGradient(gradient, start: CGPoint(x: 0, y: 600), end: CGPoint(x: fadeWidth, y: 600), options: [])
+        context.restoreGState()
+
+        // Right edge
+        context.saveGState()
+        context.clip(to: CGRect(x: 1600 - fadeWidth, y: 0, width: fadeWidth, height: 1200))
+        context.drawLinearGradient(gradient, start: CGPoint(x: 1600, y: 600), end: CGPoint(x: 1600 - fadeWidth, y: 600), options: [])
+        context.restoreGState()
+
+        context.restoreGState()
     }
 
     private func drawElevationBands(in context: CGContext, palette: TerrainPalette) {
@@ -1794,8 +1896,9 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
                     current = target
                 } while current != start
                 guard ring.count >= 3, current == start else { continue }
-                // Remove cell-scale stair steps before fitting quadratic curves.
-                for _ in 0..<(ring.count > 12 ? 5 : 1) {
+                // Remove cell-scale stair steps before fitting quadratic curves with multi-pass Laplacian smoothing.
+                let smoothingPasses = ring.count > 12 ? 10 : (ring.count > 5 ? 4 : 2)
+                for _ in 0..<smoothingPasses {
                     let previousRing = ring
                     for index in ring.indices {
                         let a = previousRing[(index + ring.count - 1) % ring.count]
@@ -1992,6 +2095,87 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
                     in: context
                 )
             }
+        }
+    }
+
+    private func drawRailwayStations(in context: CGContext) {
+        guard !railwayStations.isEmpty else { return }
+        let badgeRadius: CGFloat = max(5, 7.5 / zoomScale)
+        let innerRadius: CGFloat = max(2, 3 / zoomScale)
+        let strokeWidth: CGFloat = max(1.2, 1.8 / zoomScale)
+
+        for station in railwayStations {
+            let center = CGPoint(x: station.point.x, y: station.point.y)
+            let isSelected = selectedStationID == station.id
+
+            context.saveGState()
+
+            // Station circle badge shadow
+            context.setShadow(
+                offset: CGSize(width: 0, height: 1.5 / zoomScale),
+                blur: 3 / zoomScale,
+                color: UIColor.black.withAlphaComponent(0.25).cgColor
+            )
+
+            // Outer ring
+            let circleRect = CGRect(
+                x: center.x - badgeRadius,
+                y: center.y - badgeRadius,
+                width: badgeRadius * 2,
+                height: badgeRadius * 2
+            )
+            context.setFillColor(UIColor.systemBackground.cgColor)
+            context.fillEllipse(in: circleRect)
+
+            context.setStrokeColor(
+                isSelected ? UIColor.systemOrange.cgColor : UIColor(red: 0.22, green: 0.25, blue: 0.28, alpha: 1).cgColor
+            )
+            context.setLineWidth(isSelected ? strokeWidth * 1.5 : strokeWidth)
+            context.strokeEllipse(in: circleRect)
+
+            // Inner dot
+            let innerRect = CGRect(
+                x: center.x - innerRadius,
+                y: center.y - innerRadius,
+                width: innerRadius * 2,
+                height: innerRadius * 2
+            )
+            context.setFillColor(
+                isSelected ? UIColor.systemOrange.cgColor : UIColor(red: 0.22, green: 0.25, blue: 0.28, alpha: 1).cgColor
+            )
+            context.fillEllipse(in: innerRect)
+
+            // Station name label
+            let fontSize: CGFloat = max(11, 13 / zoomScale)
+            let font = UIFont.systemFont(ofSize: fontSize, weight: .bold)
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: isSelected ? UIColor.systemOrange : UIColor.label
+            ]
+            let attributedText = NSAttributedString(string: station.name, attributes: attributes)
+            let textSize = attributedText.size()
+            let labelOrigin = CGPoint(
+                x: center.x - textSize.width / 2,
+                y: center.y + badgeRadius + 4 / zoomScale
+            )
+
+            // Pill background behind label for contrast
+            let bgRect = CGRect(
+                x: labelOrigin.x - 5 / zoomScale,
+                y: labelOrigin.y - 2 / zoomScale,
+                width: textSize.width + 10 / zoomScale,
+                height: textSize.height + 4 / zoomScale
+            )
+            let pillPath = UIBezierPath(roundedRect: bgRect, cornerRadius: 4 / zoomScale)
+            context.setFillColor(UIColor.systemBackground.withAlphaComponent(0.88).cgColor)
+            context.addPath(pillPath.cgPath)
+            context.fillPath()
+
+            UIGraphicsPushContext(context)
+            attributedText.draw(at: labelOrigin)
+            UIGraphicsPopContext()
+
+            context.restoreGState()
         }
     }
 
@@ -2230,7 +2414,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
             (road.kind.screenWidth + road.kind.casingWidth)
                 * widthFactor / zoomScale
         )
-        if road.kind == .railway || road.structure == .tunnel {
+        if road.structure == .tunnel {
             context.setLineDash(phase: 0, lengths: [8 / zoomScale, 5 / zoomScale])
         }
         if road.structure == .bridge {
@@ -2261,7 +2445,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
             theme.roadPalette.color(for: road.kind, level: road.level).cgColor
         )
         context.setLineWidth(road.kind.screenWidth * widthFactor / zoomScale)
-        if road.kind == .railway || road.structure == .tunnel {
+        if road.structure == .tunnel {
             context.setLineDash(phase: 0, lengths: [8 / zoomScale, 5 / zoomScale])
         }
         if road.structure == .bridge || road.structure == .elevated {

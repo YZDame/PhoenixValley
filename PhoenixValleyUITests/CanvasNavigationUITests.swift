@@ -178,6 +178,14 @@ final class CanvasNavigationUITests: XCTestCase {
         attach("Apple basemap after import")
     }
 
+    func testPortraitOrientationRenderingAndNavigation() {
+        launchEditor()
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertTrue(element("road-canvas").waitForExistence(timeout: 10))
+        attach("Portrait mode canvas")
+        XCUIDevice.shared.orientation = .landscapeLeft
+    }
+
     private func attach(_ name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = name

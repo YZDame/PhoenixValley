@@ -538,7 +538,7 @@ public struct AutoStructurePlannerConfiguration: Codable, Hashable, Sendable {
     public func scaledForCanvas(
         metersPerPoint: Double
     ) -> AutoStructurePlannerConfiguration {
-        let scale = min(10, max(0.1, metersPerPoint))
+        let scale = min(100, max(0.1, metersPerPoint))
         var copy = self
         copy.sampleSpacing /= scale
         copy.elevationScale /= scale

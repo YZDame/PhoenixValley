@@ -348,6 +348,8 @@ private enum MapScalePreset: Double, CaseIterable, Identifiable {
     case wide = 5
     case world = 20
     case largeWorld = 40
+    case megaWorld = 62.5
+    case grandWorld = 100
 
     var id: Double { rawValue }
 
