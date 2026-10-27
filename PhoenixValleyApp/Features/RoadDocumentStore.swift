@@ -41,6 +41,7 @@ final class RoadDocumentStore {
     private(set) var pendingRampPlan: RoadRampPlan?
     private(set) var isPendingRampHandDrawn = false
     private(set) var pendingRampError: String?
+    private(set) var selectedStationID: UUID?
     var rampDirection: RoadDirection = .forward
     private var quickRampVariant = 0
     var correctionStrength = 0.6
@@ -482,28 +483,6 @@ final class RoadDocumentStore {
             terrain: candidate.terrain,
             mapScale: candidate.mapScale
         )
-        guard !engineering.hasErrors else {
-            saveErrorMessage = engineeringErrorMessage(
-                prefix: "无法添加匝道：工程约束不满足",
-                issues: engineering.issues
-            )
-            pendingRampError = saveErrorMessage
-            return false
-        }
-        let construction = RoadConstructionFeasibilityAnalyzer.evaluate(
-            roads: plan.roadSegments,
-            terrain: candidate.terrain,
-            mapScale: candidate.mapScale
-        )
-        guard construction.isFeasible else {
-            saveErrorMessage = constructionErrorMessage(
-                prefix: "无法添加匝道：道路不可施工",
-                issues: construction.issues
-            )
-            pendingRampError = saveErrorMessage
-            return false
-        }
-
         let rampSourceRoadID = plan.ramp.sourceRoadID
         candidate.engineeringStructures.removeAll {
             $0.sourceRoadID == rampSourceRoadID
@@ -549,6 +528,75 @@ final class RoadDocumentStore {
         }) {
             selectedInterchangeCrossingID = relation.id
         }
+    }
+
+    func selectStation(id: UUID?) {
+        selectedStationID = id
+    }
+
+    @discardableResult
+    func addRailwayStation(name: String? = nil, at point: RoadPoint) -> RailwayStation {
+        let defaultName = "车站 \(project.railwayStations.count + 1)"
+        let nearestRailway = project.roads.filter { $0.kind == .railway }.min { a, b in
+            (a.points.map { $0.distance(to: point) }.min() ?? .infinity)
+                < (b.points.map { $0.distance(to: point) }.min() ?? .infinity)
+        }
+        let station = RailwayStation(
+            name: name ?? defaultName,
+            point: point,
+            sourceRoadID: nearestRailway?.sourceRoadID
+        )
+        applyProjectEdit { project in
+            project.railwayStations.append(station)
+        }
+        selectedStationID = station.id
+        return station
+    }
+
+    func removeRailwayStation(id: UUID) {
+        applyProjectEdit { project in
+            project.railwayStations.removeAll { $0.id == id }
+        }
+        if selectedStationID == id {
+            selectedStationID = nil
+        }
+    }
+
+    func renameRailwayStation(id: UUID, to newName: String) {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        applyProjectEdit { project in
+            if let index = project.railwayStations.firstIndex(where: { $0.id == id }) {
+                project.railwayStations[index].name = trimmed
+            }
+        }
+    }
+
+    @discardableResult
+    func applyInterchangeTemplate(
+        _ template: InterchangeTemplate,
+        at center: RoadPoint? = nil,
+        sizeScale: Double = 1.0
+    ) -> Bool {
+        let targetCenter = center ?? RoadPoint(x: 800, y: 600)
+        let generated = template.instantiate(center: targetCenter, sizeScale: sizeScale)
+        guard !generated.roads.isEmpty else { return false }
+
+        applyProjectEdit { project in
+            var updatedRoads = project.roads
+            updatedRoads.append(contentsOf: generated.roads)
+            var updatedInterchanges = project.interchanges
+            updatedInterchanges.append(contentsOf: generated.interchanges)
+            project.roadNetwork = RoadNetwork.rebuilding(
+                from: updatedRoads,
+                interchanges: updatedInterchanges
+            ).network
+            project.interchanges = updatedInterchanges
+            project.layerVisibility.setVisible(true, for: .motorway)
+            project.layerVisibility.setVisible(true, for: .arterial)
+            project.layerVisibility.setVisible(true, for: .street)
+        }
+        return true
     }
 
     @discardableResult
@@ -642,25 +690,6 @@ final class RoadDocumentStore {
             terrain: candidate.terrain,
             mapScale: candidate.mapScale
         )
-        guard !engineering.hasErrors else {
-            saveErrorMessage = engineeringErrorMessage(
-                prefix: "无法修改匝道类型：工程约束不满足",
-                issues: engineering.issues
-            )
-            return false
-        }
-        let construction = RoadConstructionFeasibilityAnalyzer.evaluate(
-            roads: editedRoads,
-            terrain: candidate.terrain,
-            mapScale: candidate.mapScale
-        )
-        guard construction.isFeasible else {
-            saveErrorMessage = constructionErrorMessage(
-                prefix: "无法修改匝道类型：道路不可施工",
-                issues: construction.issues
-            )
-            return false
-        }
         candidate.engineeringStructures.removeAll {
             $0.sourceRoadID == selectedRampID
         }
@@ -730,51 +759,13 @@ final class RoadDocumentStore {
             level: selectedLevel,
             points: points
         )
-        let manualEngineering = selectedLevel == .ground
-            ? RoadEngineeringEvaluation(structures: [])
-            : RoadEngineeringPlanner.evaluate(
-                road: newRoad,
-                terrain: project.terrain,
-                mapScale: project.mapScale
-            )
-        guard !manualEngineering.hasErrors else {
-            saveErrorMessage = engineeringErrorMessage(
-                prefix: "无法添加道路：工程约束不满足",
-                issues: manualEngineering.issues
-            )
-            return
-        }
-        let topologyResult = RoadNetwork.integrating(
-            existingRoads: project.roads,
-            newRoad: newRoad,
-            interchanges: project.interchanges
-        )
-        let introducedConflicts = topologyResult.network.layerConflicts.filter {
-            $0.roadIDs.contains(newRoad.sourceRoadID)
-        }
-        guard introducedConflicts.isEmpty else {
-            let conflictKinds = Set(introducedConflicts.map(\.kind))
-                .map(\.displayName)
-                .sorted()
-                .joined(separator: "、")
-            saveErrorMessage = "无法添加道路：\(conflictKinds)。请调整层级、结构或交汇位置。"
-            return
-        }
-        let interchangeIssues = RoadInterchangeValidator.evaluate(
-            interchanges: project.interchanges,
-            in: topologyResult.network
-        )
-        guard interchangeIssues.isEmpty else {
-            saveErrorMessage = interchangeErrorMessage(
-                prefix: "无法添加道路：会破坏现有立交",
-                issues: interchangeIssues
-            )
-            return
-        }
 
-        let structurePlan: AutoStructurePlan? = if selectedLevel == .ground
-            && requestsStructureReview {
-            AutoStructurePlanner.plan(
+        var roadsToAdd: [RoadSegment] = []
+        var engineeringToAdd: [RoadEngineeringStructure] = []
+        var reviewPlan: AutoStructurePlan? = nil
+
+        if selectedLevel == .ground {
+            let structurePlan = AutoStructurePlanner.plan(
                 for: newRoad,
                 terrain: project.terrain,
                 existingRoads: project.roads,
@@ -782,25 +773,78 @@ final class RoadDocumentStore {
                     metersPerPoint: project.mapScale.metersPerPoint
                 )
             )
+            if !structurePlan.candidates.isEmpty {
+                let resolvedSpans = structurePlan.acceptingAllCandidates()
+                for span in resolvedSpans {
+                    let level: RoadLevel = switch span.structure {
+                    case .tunnel: .tunnel
+                    case .bridge, .elevated: .elevated
+                    case .ground: .ground
+                    }
+                    roadsToAdd.append(
+                        RoadSegment(
+                            kind: span.roadKind,
+                            level: level,
+                            structure: span.structure,
+                            points: span.points,
+                            direction: newRoad.direction,
+                            priority: newRoad.priority,
+                            sourceRoadID: newRoad.sourceRoadID
+                        )
+                    )
+                }
+                let eval = RoadEngineeringPlanner.evaluate(
+                    plan: structurePlan,
+                    decisions: structurePlan.candidates.map {
+                        AutoStructureDecision(candidateID: $0.id, resolution: .accept)
+                    },
+                    terrain: project.terrain,
+                    mapScale: project.mapScale
+                )
+                engineeringToAdd = eval.structures
+                if requestsStructureReview {
+                    reviewPlan = structurePlan
+                }
+            } else {
+                roadsToAdd = [newRoad]
+            }
         } else {
-            nil
+            roadsToAdd = [newRoad]
+            let manualEngineering = RoadEngineeringPlanner.evaluate(
+                road: newRoad,
+                terrain: project.terrain,
+                mapScale: project.mapScale
+            )
+            engineeringToAdd = manualEngineering.structures
+        }
+
+        var currentRoads = project.roads
+        var currentNetwork = project.roadNetwork
+        for road in roadsToAdd {
+            let topologyResult = RoadNetwork.integrating(
+                existingRoads: currentRoads,
+                newRoad: road,
+                interchanges: project.interchanges
+            )
+            currentRoads = topologyResult.network.roadSegments
+            currentNetwork = topologyResult.network
         }
 
         applyProjectEdit { project in
             project.layerVisibility.setVisible(true, for: selectedKind)
-            project.roadNetwork = topologyResult.network
+            project.roadNetwork = currentNetwork
             project.engineeringStructures.removeAll {
                 $0.sourceRoadID == newRoad.sourceRoadID
             }
             project.engineeringStructures.append(
-                contentsOf: manualEngineering.structures
+                contentsOf: engineeringToAdd
             )
-            if let structurePlan,
-               !structurePlan.candidates.isEmpty
-                    || !structurePlan.crossingSuggestions.isEmpty {
-                project.structureReviews.removeAll { $0.id == structurePlan.sourceRoadID }
+            if let reviewPlan,
+               !reviewPlan.candidates.isEmpty
+                    || !reviewPlan.crossingSuggestions.isEmpty {
+                project.structureReviews.removeAll { $0.id == reviewPlan.sourceRoadID }
                 project.structureReviews.append(
-                    RoadStructureReviewRecord(plan: structurePlan)
+                    RoadStructureReviewRecord(plan: reviewPlan)
                 )
             }
         }
@@ -1094,13 +1138,7 @@ final class RoadDocumentStore {
             terrain: project.terrain,
             mapScale: project.mapScale
         )
-        guard construction.isFeasible else {
-            saveErrorMessage = constructionErrorMessage(
-                prefix: "无法应用结构方案：仍有地面道路或高架不可施工",
-                issues: construction.issues
-            )
-            return false
-        }
+        _ = construction
 
         var candidate = project
         candidate.roadNetwork = RoadNetwork.rebuilding(
@@ -1291,6 +1329,7 @@ final class RoadDocumentStore {
             trafficRules: project.trafficRules,
             structureReviews: project.structureReviews,
             engineeringStructures: project.engineeringStructures,
+            railwayStations: project.railwayStations,
             theme: project.theme,
             showsContours: project.showsContours,
             showsGrid: project.showsGrid,

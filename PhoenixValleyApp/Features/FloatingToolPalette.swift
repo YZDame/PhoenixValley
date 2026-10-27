@@ -132,6 +132,22 @@ private struct ToolControls: View {
             } else {
                 levelPicker.frame(width: 220)
 
+                if document.selectedKind == .railway {
+                    Divider().frame(height: 36).padding(.horizontal, 4)
+                    PaletteActionButton(
+                        title: "设车站",
+                        symbol: "building.2.crop.circle",
+                        identifier: "add-station-button"
+                    ) {
+                        let railway = document.project.roads.filter { $0.kind == .railway }.last
+                        let pt = railway?.points.isEmpty == false
+                            ? railway!.points[railway!.points.count / 2]
+                            : RoadPoint(x: 800, y: 600)
+                        _ = document.addRailwayStation(at: pt)
+                    }
+                    .frame(width: 62, height: 50)
+                }
+
                 Divider().frame(height: 36).padding(.horizontal, 4)
                 correctionSlider.frame(width: 104)
             }

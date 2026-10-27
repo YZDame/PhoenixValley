@@ -611,6 +611,7 @@ public enum TerrainGenerator {
         // inset land polygon. Raise the threshold so rivers stay narrow instead
         // of turning the map edge into a broad wet band.
         let streamThreshold = max(8, Double(cellCount) * 0.009)
+        let rawElevations = elevations
         var lakeCandidates: [Int] = []
         for major in 1..<(majorCount - 1) {
             let progress = Double(major) / Double(max(1, majorCount - 1))
@@ -660,16 +661,17 @@ public enum TerrainGenerator {
         }
 
         // Lakes pool in low-lying valleys and depressions, strictly avoiding mountain summits and ridges.
+        // We use pristine rawElevations (before river carving) so carved mountain passes are not falsely treated as low valleys.
         let lowCandidates: [Int]
         if !lakeCandidates.isEmpty {
-            let sortedByElevation = lakeCandidates.sorted { elevations[$0] < elevations[$1] }
+            let sortedByElevation = lakeCandidates.sorted { rawElevations[$0] < rawElevations[$1] }
             let cutoffIndex = max(1, Int(ceil(Double(sortedByElevation.count) * 0.45)))
             let lowCutoff = sortedByElevation[cutoffIndex - 1]
             let maxAllowedElevation = max(
-                elevations[lowCutoff],
+                rawElevations[lowCutoff],
                 UInt16(min(0.95, (waterLevel + 0.15)) * Double(UInt16.max))
             )
-            lowCandidates = lakeCandidates.filter { elevations[$0] <= maxAllowedElevation }
+            lowCandidates = lakeCandidates.filter { rawElevations[$0] <= maxAllowedElevation }
         } else {
             lowCandidates = []
         }

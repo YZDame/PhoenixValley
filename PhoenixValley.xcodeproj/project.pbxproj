@@ -29,6 +29,7 @@
 		A1000000000000000000000A /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000A /* PrivacyInfo.xcprivacy */; };
 		A1000000000000000000000B /* RoadSelectionInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000B /* RoadSelectionInspector.swift */; };
 		A1000000000000000000000C /* RoadInterchangeInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000C /* RoadInterchangeInspector.swift */; };
+		A1000000000000000000000D /* RailwayStationInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000F /* RailwayStationInspector.swift */; };
         C10000000000000000000001 = {isa = PBXBuildFile; fileRef = C20000000000000000000001; };
 /* End PBXBuildFile section */
 
@@ -56,6 +57,7 @@
 		A2000000000000000000000A /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		A2000000000000000000000B /* RoadSelectionInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoadSelectionInspector.swift; sourceTree = "<group>"; };
 		A2000000000000000000000C /* RoadInterchangeInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoadInterchangeInspector.swift; sourceTree = "<group>"; };
+		A2000000000000000000000F /* RailwayStationInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RailwayStationInspector.swift; sourceTree = "<group>"; };
 		A2000000000000000000000D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A2000000000000000000000E /* PhoenixValley.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PhoenixValley.entitlements; sourceTree = "<group>"; };
         C20000000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasNavigationUITests.swift; sourceTree = "<group>"; };
@@ -133,6 +135,7 @@
 				A20000000000000000000003 /* RoadDocumentStore.swift */,
 				A2000000000000000000000B /* RoadSelectionInspector.swift */,
 				A2000000000000000000000C /* RoadInterchangeInspector.swift */,
+				A2000000000000000000000F /* RailwayStationInspector.swift */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -280,6 +283,7 @@
 				A10000000000000000000007 /* PhoenixValleyIntents.swift in Sources */,
 				A1000000000000000000000B /* RoadSelectionInspector.swift in Sources */,
 				A1000000000000000000000C /* RoadInterchangeInspector.swift in Sources */,
+				A1000000000000000000000D /* RailwayStationInspector.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
