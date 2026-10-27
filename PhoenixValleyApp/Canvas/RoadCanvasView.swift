@@ -132,6 +132,7 @@ struct RoadCanvasRepresentable: UIViewRepresentable {
         view.selectedSourceRoadIDs = selectedSourceRoadIDs
         view.railwayStations = project.railwayStations
         view.selectedStationID = selectedStationID
+        view.referenceOverlay = project.referenceOverlay
         view.mapScale = project.mapScale
         view.accessibilityValue = [
             project.name,
@@ -293,6 +294,19 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
             setNeedsDisplay()
         }
     }
+    var referenceOverlay: ReferenceImageOverlay? {
+        didSet {
+            if referenceOverlay?.imageData != oldValue?.imageData {
+                if let data = referenceOverlay?.imageData, let uiImage = UIImage(data: data) {
+                    cachedOverlayImage = uiImage.cgImage
+                } else {
+                    cachedOverlayImage = nil
+                }
+            }
+            setNeedsDisplay()
+        }
+    }
+    private var cachedOverlayImage: CGImage?
     var onStrokeFinished: (([RoadPoint]) -> Void)?
     var onEraseFinished: ((RoadEraseRequest) -> Void)?
     var onSelectionChanged: ((Set<UUID>) -> Void)?
@@ -520,6 +534,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
             alpha: 0.72,
             in: context
         )
+        drawReferenceOverlay(in: context)
         drawRoads(in: context)
         drawInterchanges(in: context)
         drawRailwayStations(in: context)
@@ -2211,6 +2226,26 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
 
             context.restoreGState()
         }
+    }
+
+    private func drawReferenceOverlay(in context: CGContext) {
+        guard let overlay = referenceOverlay,
+              overlay.isVisible,
+              overlay.opacity > 0.01,
+              let image = cachedOverlayImage else { return }
+
+        context.saveGState()
+        context.setAlpha(CGFloat(overlay.opacity))
+        let rect = CGRect(
+            x: overlay.bounds.count >= 4 ? overlay.bounds[0] : 0,
+            y: overlay.bounds.count >= 4 ? overlay.bounds[1] : 0,
+            width: overlay.bounds.count >= 4 ? overlay.bounds[2] : 1600,
+            height: overlay.bounds.count >= 4 ? overlay.bounds[3] : 1200
+        )
+        context.translateBy(x: 0, y: rect.origin.y * 2 + rect.height)
+        context.scaleBy(x: 1, y: -1)
+        context.draw(image, in: rect)
+        context.restoreGState()
     }
 
     private func nearestEndpoint(to canvasPoint: RoadPoint) -> RoadPoint? {

@@ -1,5 +1,6 @@
 import Foundation
 import PhoenixValleyCore
+import PhotosUI
 import SwiftUI
 
 struct MapAppearanceButton: View {
@@ -49,6 +50,7 @@ struct MapAppearancePopover: View {
     @Bindable var document: RoadDocumentStore
     @Binding var enablesAdvancedEngineeringAnalysis: Bool
     @Binding var showsConstructionIssueOverlay: Bool
+    @State private var selectedPhotoItem: PhotosPickerItem? = nil
 
     var body: some View {
         let constructionIssues = document.constructionIssues
@@ -133,6 +135,10 @@ struct MapAppearancePopover: View {
                     }
                 }
                 .font(.subheadline)
+
+                Divider()
+
+                referenceImageSection
 
                 if !document.layerConflicts.isEmpty {
                     Divider()
@@ -254,6 +260,79 @@ struct MapAppearancePopover: View {
         .scrollIndicators(.visible)
         .frame(width: 390)
         .frame(maxHeight: 620)
+    }
+
+    private var referenceImageSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("参考底图")
+                .font(.subheadline.weight(.semibold))
+
+            if let overlay = document.project.referenceOverlay {
+                Toggle(
+                    "显示底图",
+                    systemImage: overlay.isVisible ? "eye" : "eye.slash",
+                    isOn: Binding(
+                        get: { overlay.isVisible },
+                        set: { _ in document.toggleReferenceOverlayVisibility() }
+                    )
+                )
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("透明度")
+                        Spacer()
+                        Text("\(Int(overlay.opacity * 100))%")
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(
+                        value: Binding(
+                            get: { overlay.opacity },
+                            set: { document.updateReferenceOverlayOpacity($0) }
+                        ),
+                        in: 0.1...1.0,
+                        step: 0.05
+                    )
+                }
+
+                HStack(spacing: 12) {
+                    PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                        Label("更换图片", systemImage: "photo.badge.plus")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button(role: .destructive) {
+                        document.removeReferenceOverlay()
+                    } label: {
+                        Label("删除", systemImage: "trash")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            } else {
+                PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                    Label("导入参考底图", systemImage: "photo.badge.plus")
+                        .font(.subheadline)
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("import-reference-image-button")
+
+                Text("支持导入规划图或照片作为绘路半透明参考图层。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.subheadline)
+        .onChange(of: selectedPhotoItem) { _, newItem in
+            Task {
+                guard let newItem,
+                      let data = try? await newItem.loadTransferable(type: Data.self) else { return }
+                await MainActor.run {
+                    document.setReferenceOverlay(imageName: "参考底图", imageData: data)
+                    selectedPhotoItem = nil
+                }
+            }
+        }
     }
 
     private var terrainSelection: Binding<Bool> {

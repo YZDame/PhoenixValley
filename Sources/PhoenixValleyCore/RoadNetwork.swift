@@ -371,6 +371,31 @@ public struct RailwayStation: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
+public struct ReferenceImageOverlay: Identifiable, Codable, Hashable, Sendable {
+    public let id: UUID
+    public var imageName: String
+    public var imageData: Data?
+    public var opacity: Double
+    public var isVisible: Bool
+    public var bounds: [Double]
+
+    public init(
+        id: UUID = UUID(),
+        imageName: String = "参考底图",
+        imageData: Data? = nil,
+        opacity: Double = 0.5,
+        isVisible: Bool = true,
+        bounds: [Double] = [0, 0, 1600, 1200]
+    ) {
+        self.id = id
+        self.imageName = imageName
+        self.imageData = imageData
+        self.opacity = opacity
+        self.isVisible = isVisible
+        self.bounds = bounds
+    }
+}
+
 public struct RoadProject: Identifiable, Codable, Hashable, Sendable {
     public static let currentFormatVersion = 14
 
@@ -393,6 +418,7 @@ public struct RoadProject: Identifiable, Codable, Hashable, Sendable {
     public var mapScale: MapScale
     public var groupID: UUID?
     public var realWorldMap: RealWorldMap?
+    public var referenceOverlay: ReferenceImageOverlay?
 
     public init(
         id: UUID = UUID(),
@@ -413,7 +439,8 @@ public struct RoadProject: Identifiable, Codable, Hashable, Sendable {
         layerVisibility: MapLayerVisibility = .init(),
         mapScale: MapScale = .standard,
         groupID: UUID? = nil,
-        realWorldMap: RealWorldMap? = nil
+        realWorldMap: RealWorldMap? = nil,
+        referenceOverlay: ReferenceImageOverlay? = nil
     ) {
         self.id = id
         self.formatVersion = Self.currentFormatVersion
@@ -437,6 +464,7 @@ public struct RoadProject: Identifiable, Codable, Hashable, Sendable {
         self.mapScale = mapScale
         self.groupID = groupID
         self.realWorldMap = realWorldMap
+        self.referenceOverlay = referenceOverlay
     }
 
     public var roads: [RoadSegment] {
@@ -454,7 +482,7 @@ public struct RoadProject: Identifiable, Codable, Hashable, Sendable {
         case roadNetwork, interchanges, trafficRules
         case structureReviews, engineeringStructures, railwayStations
         case theme, showsContours, showsGrid
-        case layerVisibility, mapScale, groupID, realWorldMap
+        case layerVisibility, mapScale, groupID, realWorldMap, referenceOverlay
     }
 
     public init(from decoder: Decoder) throws {
@@ -519,6 +547,7 @@ public struct RoadProject: Identifiable, Codable, Hashable, Sendable {
         ) ?? .standard
         groupID = try values.decodeIfPresent(UUID.self, forKey: .groupID)
         realWorldMap = try values.decodeIfPresent(RealWorldMap.self, forKey: .realWorldMap)
+        referenceOverlay = try values.decodeIfPresent(ReferenceImageOverlay.self, forKey: .referenceOverlay)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -543,5 +572,6 @@ public struct RoadProject: Identifiable, Codable, Hashable, Sendable {
         try values.encode(mapScale, forKey: .mapScale)
         try values.encodeIfPresent(groupID, forKey: .groupID)
         try values.encodeIfPresent(realWorldMap, forKey: .realWorldMap)
+        try values.encodeIfPresent(referenceOverlay, forKey: .referenceOverlay)
     }
 }

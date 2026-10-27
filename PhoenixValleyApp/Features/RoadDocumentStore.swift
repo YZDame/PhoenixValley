@@ -248,6 +248,39 @@ final class RoadDocumentStore {
         selectedSourceRoadIDs.removeAll()
     }
 
+    func setReferenceOverlay(imageName: String, imageData: Data) {
+        project.referenceOverlay = ReferenceImageOverlay(
+            imageName: imageName,
+            imageData: imageData,
+            opacity: 0.5,
+            isVisible: true
+        )
+        project.updatedAt = .now
+        persist()
+    }
+
+    func updateReferenceOverlayOpacity(_ opacity: Double) {
+        guard var overlay = project.referenceOverlay else { return }
+        overlay.opacity = min(1.0, max(0.0, opacity))
+        project.referenceOverlay = overlay
+        project.updatedAt = .now
+        persist()
+    }
+
+    func toggleReferenceOverlayVisibility() {
+        guard var overlay = project.referenceOverlay else { return }
+        overlay.isVisible.toggle()
+        project.referenceOverlay = overlay
+        project.updatedAt = .now
+        persist()
+    }
+
+    func removeReferenceOverlay() {
+        project.referenceOverlay = nil
+        project.updatedAt = .now
+        persist()
+    }
+
     func selectInterchangeCrossing(id: UUID?) {
         cancelRampDraft()
         selectedRampID = nil
