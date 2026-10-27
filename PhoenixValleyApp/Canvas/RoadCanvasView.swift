@@ -206,12 +206,29 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
     var realWorldMap: RealWorldMap? {
         didSet { if oldValue != realWorldMap { cachedTerrainImage = nil } }
     }
-    var roads: [RoadSegment] = []
+    var roads: [RoadSegment] = [] {
+        didSet {
+            guard oldValue != roads else { return }
+            roadsByLevel = Dictionary(grouping: roads, by: \.level)
+            updateRoadPathCache()
+            setNeedsDisplay()
+        }
+    }
+    private var roadsByLevel: [RoadLevel: [RoadSegment]] = [:]
+    private var roadPathCache: [UUID: (segment: RoadSegment, path: CGPath)] = [:]
+
     var constructionIssues: [RoadConstructionIssue] = []
     var engineeringStructures: [RoadEngineeringStructure] = []
     var pendingStructureReview: RoadStructureReviewRecord?
     var pendingEngineeringStructures: [RoadEngineeringStructure] = []
-    var interchanges: [RoadInterchange] = []
+    var interchanges: [RoadInterchange] = [] {
+        didSet {
+            guard oldValue != interchanges else { return }
+            cachedRampSourceRoadIDs = Set(interchanges.flatMap(\.ramps).map(\.sourceRoadID))
+            setNeedsDisplay()
+        }
+    }
+    private var cachedRampSourceRoadIDs: Set<UUID> = []
     var relations: [RoadRelation] = []
     var selectedKind: RoadKind = .arterial
     var selectedLevel: RoadLevel = .ground
@@ -267,8 +284,16 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         didSet { if oldValue != mapScale { cachedTerrainImage = nil } }
     }
     var theme: MapTheme = .planning {
-        didSet { if oldValue != theme { transitionTerrain() } }
+        didSet {
+            if oldValue != theme {
+                currentRoadPalette = theme.roadPalette
+                currentTerrainPalette = theme.terrainPalette
+                transitionTerrain()
+            }
+        }
     }
+    private var currentRoadPalette: RoadPalette = MapTheme.planning.roadPalette
+    private var currentTerrainPalette: TerrainPalette = MapTheme.planning.terrainPalette
     var showsTerrain = true
     var showsHydrology = true {
         didSet { if oldValue != showsHydrology { transitionTerrain() } }
@@ -498,7 +523,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
 
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
-        let palette = theme.terrainPalette
+        let palette = currentTerrainPalette
         if realWorldMap?.source != .appleMaps {
         context.setFillColor(
             (
@@ -1233,7 +1258,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
     }
 
     private var rampSourceRoadIDs: Set<UUID> {
-        Set(interchanges.flatMap(\.ramps).map(\.sourceRoadID))
+        cachedRampSourceRoadIDs
     }
 
     private var selectableInterchangeCrossings: [RoadRelation] {
@@ -1727,7 +1752,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
             CartographicRenderer.draw(realWorldMap, theme: theme, showsTerrain: true, showsHydrology: showsHydrology, in: context)
             return
         }
-        let palette = theme.terrainPalette
+        let palette = currentTerrainPalette
         if !terrain.scenario.hasOceanBoundary {
             context.setFillColor(palette.plain.cgColor)
             context.fill(CGRect(x: 0, y: 0, width: 1600, height: 1200))
@@ -2076,12 +2101,14 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
 
     private func drawRoads(in context: CGContext) {
         for level in RoadLevel.allCases {
-            for road in roads where road.level == level {
+            guard let levelRoads = roadsByLevel[level] else { continue }
+            for road in levelRoads {
                 drawRoadCasing(road: road, in: context)
             }
         }
         for level in RoadLevel.allCases {
-            for road in roads where road.level == level {
+            guard let levelRoads = roadsByLevel[level] else { continue }
+            for road in levelRoads {
                 drawRoadSurface(road: road, in: context)
             }
         }
@@ -2518,7 +2545,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
                 context.setLineCap(.round)
                 context.setLineJoin(.round)
                 context.setStrokeColor(
-                    theme.roadPalette.casing.withAlphaComponent(0.9 * alpha).cgColor
+                    currentRoadPalette.casing.withAlphaComponent(0.9 * alpha).cgColor
                 )
                 context.setLineWidth(5 / zoomScale)
                 context.addPath(path)
@@ -2534,7 +2561,20 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         }
     }
 
-    private func roadPath(for road: RoadSegment) -> CGMutablePath? {
+    private func updateRoadPathCache() {
+        let currentIDs = Set(roads.map(\.id))
+        roadPathCache = roadPathCache.filter { currentIDs.contains($0.key) }
+        for road in roads {
+            if let cached = roadPathCache[road.id], cached.segment == road {
+                continue
+            }
+            if let path = buildRoadPath(for: road) {
+                roadPathCache[road.id] = (road, path)
+            }
+        }
+    }
+
+    private func buildRoadPath(for road: RoadSegment) -> CGPath? {
         guard let first = road.points.first else { return nil }
         let path = CGMutablePath()
         path.move(to: first.cgPoint)
@@ -2542,6 +2582,17 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
             path.addLine(to: point.cgPoint)
         }
         return path
+    }
+
+    private func roadPath(for road: RoadSegment) -> CGPath? {
+        if let cached = roadPathCache[road.id], cached.segment == road {
+            return cached.path
+        }
+        if let path = buildRoadPath(for: road) {
+            roadPathCache[road.id] = (road, path)
+            return path
+        }
+        return nil
     }
 
     private func drawRoadCasing(road: RoadSegment, in context: CGContext) {
@@ -2553,7 +2604,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         context.saveGState()
         context.setLineCap(.round)
         context.setLineJoin(.round)
-        context.setStrokeColor(theme.roadPalette.casing.cgColor)
+        context.setStrokeColor(currentRoadPalette.casing.cgColor)
         context.setLineWidth(
             (road.kind.screenWidth + road.kind.casingWidth)
                 * widthFactor / zoomScale
@@ -2586,7 +2637,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         context.setLineCap(.round)
         context.setLineJoin(.round)
         context.setStrokeColor(
-            theme.roadPalette.color(for: road.kind, level: road.level).cgColor
+            currentRoadPalette.color(for: road.kind, level: road.level).cgColor
         )
         context.setLineWidth(road.kind.screenWidth * widthFactor / zoomScale)
         if road.structure == .tunnel {
@@ -2658,7 +2709,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
             context.setLineCap(.round)
             context.setLineJoin(.round)
             context.setStrokeColor(
-                theme.roadPalette.casing.withAlphaComponent(0.9).cgColor
+                currentRoadPalette.casing.withAlphaComponent(0.9).cgColor
             )
             context.setLineWidth(
                 (issue.roadKind.screenWidth + 7) / zoomScale
@@ -2718,7 +2769,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
                         height: radius * 2
                     )
                     context.saveGState()
-                    context.setFillColor(theme.roadPalette.casing.cgColor)
+                    context.setFillColor(currentRoadPalette.casing.cgColor)
                     context.fillEllipse(in: markerRect)
                     context.setStrokeColor(color.cgColor)
                     context.setLineWidth(2 / zoomScale)
