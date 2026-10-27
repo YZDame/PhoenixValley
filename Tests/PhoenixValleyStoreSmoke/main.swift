@@ -181,8 +181,20 @@ func verifyDefaultScale() throws {
     print("PASS default map scale consistency")
 }
 
+@MainActor
+func verifyPencilToggleEraser() throws {
+    let (store, _, _) = try fixture([])
+    try check(!store.isErasing, "initial state is not erasing")
+    store.toggleEraser()
+    try check(store.isErasing, "toggleEraser activates eraser")
+    store.toggleEraser()
+    try check(!store.isErasing, "toggleEraser switches back to drawing")
+    print("PASS toggleEraser")
+}
+
 do {
     try verifyDefaultScale()
+    try verifyPencilToggleEraser()
     try verifyTransactions()
     try verifyInterchangeAndEraser()
     try verifyPlayableInterchange()

@@ -220,6 +220,14 @@ final class RoadDocumentStore {
         resetInterchangeEditingState()
     }
 
+    func toggleEraser() {
+        if activeTool == .erase {
+            activateDrawing()
+        } else {
+            activateEraser()
+        }
+    }
+
     func activateSelection() {
         activeTool = .select
         resetInterchangeEditingState()

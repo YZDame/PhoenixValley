@@ -34,6 +34,7 @@ struct RoadCanvasRepresentable: UIViewRepresentable {
     let onInterchangeCrossingSelected: (UUID?) -> Void
     let onRampSelected: (UUID?) -> Void
     var onStationSelected: ((UUID?) -> Void)? = nil
+    var onToggleEraser: (() -> Void)? = nil
 
     func makeUIView(context: Context) -> RoadMapWorkspaceView {
         let workspace = RoadMapWorkspaceView()
@@ -47,6 +48,7 @@ struct RoadCanvasRepresentable: UIViewRepresentable {
         view.onInterchangeCrossingSelected = onInterchangeCrossingSelected
         view.onRampSelected = onRampSelected
         view.onStationSelected = onStationSelected
+        view.onToggleEraser = onToggleEraser
         return workspace
     }
 
@@ -149,6 +151,7 @@ struct RoadCanvasRepresentable: UIViewRepresentable {
         view.onInterchangeCrossingSelected = onInterchangeCrossingSelected
         view.onRampSelected = onRampSelected
         view.onStationSelected = onStationSelected
+        view.onToggleEraser = onToggleEraser
         workspace.update(project: project)
         view.refreshAccessibilityElements()
         view.setNeedsDisplay()
@@ -303,6 +306,10 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
     var onInterchangeCrossingSelected: ((UUID?) -> Void)?
     var onRampSelected: ((UUID?) -> Void)?
     var onStationSelected: ((UUID?) -> Void)?
+    var onToggleEraser: (() -> Void)?
+
+    private var hoverGesture: UIHoverGestureRecognizer?
+    private var hoverLocation: CGPoint?
 
     private var activeStroke: [RoadPoint] = []
     private var selectionInteraction: SelectionInteraction = .idle
@@ -405,6 +412,19 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         rotation.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
         rotation.delegate = self
         addGestureRecognizer(rotation)
+
+        let hover = UIHoverGestureRecognizer(target: self, action: #selector(handleHover(_:)))
+        hover.allowedTouchTypes = [
+            NSNumber(value: UITouch.TouchType.pencil.rawValue),
+            NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)
+        ]
+        addGestureRecognizer(hover)
+        hoverGesture = hover
+
+        let pencilInteraction = UIPencilInteraction()
+        pencilInteraction.delegate = self
+        addInteraction(pencilInteraction)
+
         compass.addTarget(self, action: #selector(resetNorth), for: .touchUpInside)
         compass.accessibilityIdentifier = "canvas-compass"
         addSubview(compass)
@@ -519,6 +539,7 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         drawPendingRamp(in: context)
         drawActiveStroke(in: context)
         context.restoreGState()
+        drawHoverReticle(in: context)
         if nativeMap == nil && isScaleBarVisible {
             drawScaleBar(in: context)
         }
@@ -616,6 +637,19 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard trackedTouch(in: touches) != nil else { return }
         cancelContentInteraction()
+    }
+
+    @objc private func handleHover(_ recognizer: UIHoverGestureRecognizer) {
+        switch recognizer.state {
+        case .began, .changed:
+            hoverLocation = recognizer.location(in: self)
+            setNeedsDisplay()
+        case .ended, .cancelled:
+            hoverLocation = nil
+            setNeedsDisplay()
+        default:
+            break
+        }
     }
 
     func gestureRecognizer(
@@ -2179,6 +2213,81 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         }
     }
 
+    private func nearestEndpoint(to canvasPoint: RoadPoint) -> RoadPoint? {
+        let maxDistance = 24.0 / zoomScale
+        var best: RoadPoint?
+        var bestDist = maxDistance
+        for road in roads {
+            guard let first = road.points.first, let last = road.points.last else { continue }
+            let d1 = canvasPoint.distance(to: first)
+            if d1 < bestDist {
+                bestDist = d1
+                best = first
+            }
+            let d2 = canvasPoint.distance(to: last)
+            if d2 < bestDist {
+                bestDist = d2
+                best = last
+            }
+        }
+        return best
+    }
+
+    private func drawHoverReticle(in context: CGContext) {
+        guard let hoverLocation, activeStroke.isEmpty else { return }
+        context.saveGState()
+
+        let reticleRadius: CGFloat
+        let strokeColor: UIColor
+        if isErasing {
+            reticleRadius = 18
+            strokeColor = UIColor.systemRed.withAlphaComponent(0.65)
+        } else if isSelecting {
+            reticleRadius = 14
+            strokeColor = UIColor.systemBlue.withAlphaComponent(0.65)
+        } else {
+            reticleRadius = max(6, (selectedKind.screenWidth + 4) * zoomScale / 2)
+            strokeColor = UIColor.systemOrange.withAlphaComponent(0.75)
+        }
+
+        let circleRect = CGRect(
+            x: hoverLocation.x - reticleRadius,
+            y: hoverLocation.y - reticleRadius,
+            width: reticleRadius * 2,
+            height: reticleRadius * 2
+        )
+        context.setStrokeColor(strokeColor.cgColor)
+        context.setLineWidth(1.5)
+        context.strokeEllipse(in: circleRect)
+
+        let dotRadius: CGFloat = 2.0
+        context.setFillColor(strokeColor.cgColor)
+        context.fillEllipse(in: CGRect(
+            x: hoverLocation.x - dotRadius,
+            y: hoverLocation.y - dotRadius,
+            width: dotRadius * 2,
+            height: dotRadius * 2
+        ))
+
+        if !isErasing && !isSelecting {
+            let wp = worldPoint(for: hoverLocation)
+            if let snapTarget = nearestEndpoint(to: wp) {
+                let snapScreen = screenPoint(for: snapTarget)
+                let snapRadius: CGFloat = 10
+                context.setStrokeColor(UIColor.systemGreen.cgColor)
+                context.setLineWidth(2.0)
+                context.strokeEllipse(in: CGRect(
+                    x: snapScreen.x - snapRadius,
+                    y: snapScreen.y - snapRadius,
+                    width: snapRadius * 2,
+                    height: snapRadius * 2
+                ))
+            }
+        }
+
+        context.restoreGState()
+    }
+
     private func interchangeMatchesSelectedCrossing(
         _ interchange: RoadInterchange
     ) -> Bool {
@@ -3254,5 +3363,11 @@ private final class MapEditingTouches: UIGestureRecognizer {
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
         canvas?.touchesCancelled(touches, with: event)
         state = .failed
+    }
+}
+
+extension RoadCanvasView: UIPencilInteractionDelegate {
+    func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
+        onToggleEraser?()
     }
 }
