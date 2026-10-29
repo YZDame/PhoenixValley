@@ -1459,6 +1459,9 @@ final class RoadDocumentStore {
             if project.id == projects[index].id { project = projects[index] }
             persistProject(projects[index])
         }
+        // File writes above bumped mtimes used by `recency`; re-sort once so
+        // the array stays consistent with a fresh load's ordering.
+        projects.sort(by: recency)
         persistGroups()
     }
 
@@ -1470,6 +1473,7 @@ final class RoadDocumentStore {
         projects[index].groupID = groupID
         if project.id == id { project = projects[index] }
         persistProject(projects[index])
+        projects.sort(by: recency)
     }
 
     func dismissSaveError() {
@@ -1693,8 +1697,8 @@ final class RoadDocumentStore {
             } else {
                 projects.append(project)
             }
-            projects.sort(by: recency)
             try saveProjectFile(project)
+            projects.sort(by: recency)
             saveErrorMessage = nil
         } catch {
             saveErrorMessage = error.localizedDescription
@@ -1887,6 +1891,7 @@ final class RoadDocumentStore {
                 project = projects[index]
             }
             persistProject(projects[index])
+            projects.sort(by: recency)
         }
 
         terrainGenerationRequestID = nil
