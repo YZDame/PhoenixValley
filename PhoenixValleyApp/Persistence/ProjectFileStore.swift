@@ -100,9 +100,19 @@ struct ProjectFileStore {
         }
 
         return ProjectLibraryLoadResult(
-            projects: projects.sorted { $0.updatedAt > $1.updatedAt },
+            projects: projects.sorted(by: Self.libraryRecency),
             diagnostics: diagnostics
         )
+    }
+
+    /// Recency ordering with a deterministic tiebreak: projects saved within
+    /// the same second can share identical persisted timestamps, and a plain
+    /// `updatedAt` comparison then resolves to directory order — which may
+    /// reopen a different project than the one last edited.
+    private static func libraryRecency(_ lhs: RoadProject, _ rhs: RoadProject) -> Bool {
+        if lhs.updatedAt != rhs.updatedAt { return lhs.updatedAt > rhs.updatedAt }
+        if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
+        return lhs.id.uuidString > rhs.id.uuidString
     }
 
     /// Compatibility entry point for callers that do not yet present
@@ -395,7 +405,12 @@ private struct ProjectFormatEnvelope: Decodable {
 private extension JSONEncoder {
     static var phoenixValley: JSONEncoder {
         let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
+        // Keep sub-second precision: whole-second ISO8601 made projects
+        // written in the same second share identical `updatedAt` values.
+        encoder.dateEncodingStrategy = .custom { date, encoder in
+            var container = encoder.singleValueContainer()
+            try container.encode(PhoenixValleyDateCoding.encode(date))
+        }
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return encoder
     }
@@ -404,7 +419,34 @@ private extension JSONEncoder {
 private extension JSONDecoder {
     static var phoenixValley: JSONDecoder {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let string = try container.decode(String.self)
+            // Files written before fractional seconds were introduced carry
+            // whole-second timestamps; accept both forms.
+            if let date = PhoenixValleyDateCoding.decode(string) {
+                return date
+            }
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "无法解析的日期：\(string)"
+            )
+        }
         return decoder
+    }
+}
+
+private enum PhoenixValleyDateCoding {
+    static func encode(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+    }
+
+    static func decode(_ string: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: string) { return date }
+        return ISO8601DateFormatter().date(from: string)
     }
 }

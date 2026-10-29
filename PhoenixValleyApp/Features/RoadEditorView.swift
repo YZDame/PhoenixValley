@@ -14,6 +14,22 @@ struct RoadEditorView: View {
             RoadCanvasWorkspace(document: document)
         }
         .navigationSplitViewStyle(.balanced)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            // The sidebar hosts the generation status view; when it is
+            // collapsed the detail column must still show progress and
+            // cancellation, otherwise creating a map via the toolbar "+"
+            // appears to do nothing until the canvas suddenly switches.
+            if columnVisibility == .detailOnly,
+               case let .generating(targetName, progress, usedCache)
+                   = document.terrainGenerationState {
+                TerrainGenerationStatusView(
+                    targetName: targetName,
+                    progress: progress,
+                    usedCache: usedCache,
+                    onCancel: document.cancelTerrainGeneration
+                )
+            }
+        }
         .alert(
             document.alertTitle,
             isPresented: Binding(
