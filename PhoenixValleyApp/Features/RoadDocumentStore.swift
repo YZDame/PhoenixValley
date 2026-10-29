@@ -1316,7 +1316,7 @@ final class RoadDocumentStore {
         projects[index].updatedAt = .now
         let renamedProject = projects[index]
         if project.id == id { project = renamedProject }
-        projects.sort { $0.updatedAt > $1.updatedAt }
+        projects.sort(by: Self.recency)
         persistProject(renamedProject)
     }
 
@@ -1352,7 +1352,7 @@ final class RoadDocumentStore {
         do {
             try fileStore.delete(deleted)
             projects.removeAll { $0.id == deleted.id }
-            if let next = projects.sorted(by: { $0.updatedAt > $1.updatedAt }).first {
+            if let next = projects.sorted(by: Self.recency).first {
                 project = next
             } else {
                 let seed = UInt64.random(in: 1...UInt64.max)
@@ -1521,7 +1521,7 @@ final class RoadDocumentStore {
         } else {
             projects.append(persistedProject)
         }
-        projects.sort { $0.updatedAt > $1.updatedAt }
+        projects.sort(by: Self.recency)
     }
 
     private func sanitizeRoadSelection(visibleOnly: Bool = false) {
@@ -1691,7 +1691,7 @@ final class RoadDocumentStore {
             } else {
                 projects.append(project)
             }
-            projects.sort { $0.updatedAt > $1.updatedAt }
+            projects.sort(by: Self.recency)
             try fileStore.save(project)
             saveErrorMessage = nil
         } catch {
@@ -1959,6 +1959,14 @@ final class RoadDocumentStore {
     private static func needsTerrainRegeneration(_ terrain: TerrainLayout) -> Bool {
         !terrain.hasElevationData
             || terrain.generationVersion < TerrainLayout.currentGenerationVersion
+    }
+
+    /// Matches the file store's recency ordering (`updatedAt` desc, project id
+    /// as the deterministic tiebreak) so in-memory re-sorts cannot reshuffle
+    /// legacy projects that share a whole-second timestamp.
+    private static func recency(_ lhs: RoadProject, _ rhs: RoadProject) -> Bool {
+        if lhs.updatedAt != rhs.updatedAt { return lhs.updatedAt > rhs.updatedAt }
+        return lhs.id.uuidString > rhs.id.uuidString
     }
 
     private func engineeringErrorMessage(

@@ -78,41 +78,55 @@ struct ProjectFileStore {
         .sorted { $0.lastPathComponent < $1.lastPathComponent }
 
         var projects: [RoadProject] = []
+        var fileModifiedAt: [UUID: Date] = [:]
         var diagnostics: [ProjectFileLoadDiagnostic] = []
 
         for url in urls {
-            appendLoadResult(
-                loadProject(at: url),
-                projects: &projects,
-                diagnostics: &diagnostics
-            )
+            let result = loadProject(at: url)
+            appendLoadResult(result, projects: &projects, diagnostics: &diagnostics)
+            if case let .success(project) = result {
+                fileModifiedAt[project.id] = modificationDate(of: url)
+            }
         }
 
         if projects.isEmpty {
             let legacyURL = try baseDirectory().appending(path: legacyFileName)
             if fileManager.fileExists(atPath: legacyURL.path) {
-                appendLoadResult(
-                    loadProject(at: legacyURL),
-                    projects: &projects,
-                    diagnostics: &diagnostics
-                )
+                let result = loadProject(at: legacyURL)
+                appendLoadResult(result, projects: &projects, diagnostics: &diagnostics)
+                if case let .success(project) = result {
+                    fileModifiedAt[project.id] = modificationDate(of: legacyURL)
+                }
             }
         }
 
         return ProjectLibraryLoadResult(
-            projects: projects.sorted(by: Self.libraryRecency),
+            projects: projects.sorted {
+                Self.libraryRecency($0, $1, fileModifiedAt: fileModifiedAt)
+            },
             diagnostics: diagnostics
         )
     }
 
-    /// Recency ordering with a deterministic tiebreak: projects saved within
-    /// the same second can share identical persisted timestamps, and a plain
-    /// `updatedAt` comparison then resolves to directory order — which may
-    /// reopen a different project than the one last edited.
-    private static func libraryRecency(_ lhs: RoadProject, _ rhs: RoadProject) -> Bool {
+    /// Recency ordering with deterministic tiebreaks. Files written by older
+    /// versions share whole-second `updatedAt` values, so the file's
+    /// modification time — which keeps filesystem precision and reflects the
+    /// real last write — breaks ties before falling back to the project id.
+    private static func libraryRecency(
+        _ lhs: RoadProject,
+        _ rhs: RoadProject,
+        fileModifiedAt: [UUID: Date]
+    ) -> Bool {
         if lhs.updatedAt != rhs.updatedAt { return lhs.updatedAt > rhs.updatedAt }
-        if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
+        let lhsModified = fileModifiedAt[lhs.id] ?? .distantPast
+        let rhsModified = fileModifiedAt[rhs.id] ?? .distantPast
+        if lhsModified != rhsModified { return lhsModified > rhsModified }
         return lhs.id.uuidString > rhs.id.uuidString
+    }
+
+    private func modificationDate(of url: URL) -> Date? {
+        (try? url.resourceValues(forKeys: [.contentModificationDateKey]))
+            .flatMap(\.contentModificationDate)
     }
 
     /// Compatibility entry point for callers that do not yet present
