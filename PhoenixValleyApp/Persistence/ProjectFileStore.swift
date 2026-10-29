@@ -16,6 +16,19 @@ struct ProjectGroup: Identifiable, Codable, Hashable, Sendable {
 struct ProjectLibraryLoadResult: Sendable {
     let projects: [RoadProject]
     let diagnostics: [ProjectFileLoadDiagnostic]
+    /// File modification time per successfully loaded project, used as the
+    /// recency tiebreak for legacy whole-second `updatedAt` collisions.
+    let fileModifiedAt: [UUID: Date]
+
+    init(
+        projects: [RoadProject],
+        diagnostics: [ProjectFileLoadDiagnostic],
+        fileModifiedAt: [UUID: Date] = [:]
+    ) {
+        self.projects = projects
+        self.diagnostics = diagnostics
+        self.fileModifiedAt = fileModifiedAt
+    }
 }
 
 struct ProjectFileLoadDiagnostic: Identifiable, Error, Hashable, LocalizedError, Sendable {
@@ -104,7 +117,8 @@ struct ProjectFileStore {
             projects: projects.sorted {
                 Self.libraryRecency($0, $1, fileModifiedAt: fileModifiedAt)
             },
-            diagnostics: diagnostics
+            diagnostics: diagnostics,
+            fileModifiedAt: fileModifiedAt
         )
     }
 
@@ -112,7 +126,7 @@ struct ProjectFileStore {
     /// versions share whole-second `updatedAt` values, so the file's
     /// modification time — which keeps filesystem precision and reflects the
     /// real last write — breaks ties before falling back to the project id.
-    private static func libraryRecency(
+    static func libraryRecency(
         _ lhs: RoadProject,
         _ rhs: RoadProject,
         fileModifiedAt: [UUID: Date]
