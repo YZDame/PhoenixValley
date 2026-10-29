@@ -186,6 +186,27 @@ final class CanvasNavigationUITests: XCTestCase {
         XCUIDevice.shared.orientation = .landscapeLeft
     }
 
+    func testTerrainGenerationStatusShowsWhenSidebarCollapsed() {
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .landscapeLeft
+        app = XCUIApplication()
+        app.launch()
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(app.buttons["new-design-map"].waitForExistence(timeout: 40))
+        // Ensure the sidebar is collapsed so the progress bar must come
+        // from the detail column's own safe-area inset.
+        if app.buttons["新建"].exists && app.buttons["新建"].isHittable {
+            app.buttons["Toggle Sidebar"].tap()
+        }
+        app.buttons["new-design-map"].tap()
+        let status = element("terrain-generation-progress")
+        XCTAssertTrue(status.waitForExistence(timeout: 15))
+        XCTAssertTrue(element("cancel-terrain-generation").exists)
+        let finished = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: status)
+        XCTAssertEqual(XCTWaiter.wait(for: [finished], timeout: 90), .completed)
+    }
+
     private func attach(_ name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = name
