@@ -395,6 +395,11 @@ final class RoadCanvasView: UIView, UIGestureRecognizerDelegate {
         zoomOutButton.isHidden = enabled
     }
 
+    func observeHover(on view: UIView) {
+        guard let hoverGesture else { return }
+        view.addGestureRecognizer(hoverGesture)
+    }
+
     func followNativeMap(origin: CGPoint, xAxis: CGPoint) {
         viewport = CanvasViewport(scale: hypot(xAxis.x-origin.x, xAxis.y-origin.y) / 1600,
             rotation: atan2(xAxis.y-origin.y, xAxis.x-origin.x),
@@ -3262,6 +3267,7 @@ final class RoadMapWorkspaceView: UIView, MKMapViewDelegate {
         addSubview(map)
         addSubview(canvas)
         map.addGestureRecognizer(editingTouches)
+        canvas.observeHover(on: map)
         addSubview(nativeCompass)
         addSubview(nativeScale)
         nativeCompass.compassVisibility = .visible
