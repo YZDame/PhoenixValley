@@ -181,8 +181,88 @@ func verifyDefaultScale() throws {
     print("PASS default map scale consistency")
 }
 
+@MainActor
+func verifyReferenceOverlayTransactions() throws {
+    let source = UUID()
+    let (store, files, manager) = try fixture([
+        road(source, .init(x: 100, y: 100), .init(x: 300, y: 100))
+    ])
+    let original = store.project
+    store.setSelectedSourceRoadIDs([source])
+    try check(store.deleteSelectedRoads(), "remove road before overlay import")
+    store.setReferenceOverlay(
+        imageName: "Planning.png",
+        imageData: Data([0x89, 0x50, 0x4E, 0x47]),
+        bounds: [200, 200, 800, 600]
+    )
+    try check(store.project.referenceOverlay?.bounds == [200, 200, 800, 600],
+              "overlay survives transaction commit")
+    store.undo()
+    try check(store.project.referenceOverlay == nil && store.project.roads.isEmpty,
+              "first undo reverts image import only")
+    store.undo()
+    try check(store.project.roads == original.roads && store.project.referenceOverlay == nil,
+              "second undo reverts road edit")
+    store.redo()
+    store.redo()
+    try check(store.project.roads.isEmpty && store.project.referenceOverlay != nil,
+              "redo restores both transactions")
+
+    store.updateReferenceOverlayOpacity(0.65)
+    store.updateReferenceOverlayOpacity(0.85)
+    try check(store.project.referenceOverlay?.opacity == 0.85,
+              "opacity updates preview immediately")
+    store.commitReferenceOverlayOpacityEdit()
+    try check(store.project.referenceOverlay?.opacity == 0.85,
+              "opacity drag commits once")
+    store.undo()
+    try check(store.project.referenceOverlay?.opacity == 0.5,
+              "one undo restores opacity before entire drag")
+    store.redo()
+    try check(store.project.referenceOverlay?.opacity == 0.85,
+              "redo restores final opacity")
+
+    store.toggleReferenceOverlayVisibility()
+    try check(store.project.referenceOverlay?.isVisible == false,
+              "visibility is an edit")
+    store.undo()
+    try check(store.project.referenceOverlay?.isVisible == true,
+              "visibility has undo support")
+
+    let parentID = store.project.id
+    store.duplicateCurrentProject()
+    try check(store.project.id != parentID && store.project.referenceOverlay != nil,
+              "duplicate copies reference image")
+    let copiedID = store.project.id
+    let reopened = RoadDocumentStore(fileStore: files)
+    reopened.selectProject(id: copiedID)
+    try check(reopened.project.referenceOverlay?.opacity == 0.85,
+              "duplicate persists overlay across restart")
+
+    let beforeFailure = store.project
+    manager.failResolution = true
+    store.removeReferenceOverlay()
+    try check(store.project == beforeFailure && store.saveErrorMessage != nil,
+              "failed overlay save must not discard in-memory image")
+    manager.failResolution = false
+    print("PASS reference image undo/redo, slider staging, visibility, duplicate, restart and failure")
+}
+
+@MainActor
+func verifyPencilToggleEraser() throws {
+    let (store, _, _) = try fixture([])
+    try check(!store.isErasing, "initial state is not erasing")
+    store.toggleEraser()
+    try check(store.isErasing, "toggleEraser activates eraser")
+    store.toggleEraser()
+    try check(!store.isErasing, "toggleEraser switches back to drawing")
+    print("PASS toggleEraser")
+}
+
 do {
     try verifyDefaultScale()
+    try verifyReferenceOverlayTransactions()
+    try verifyPencilToggleEraser()
     try verifyTransactions()
     try verifyInterchangeAndEraser()
     try verifyPlayableInterchange()

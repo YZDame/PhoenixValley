@@ -529,6 +529,16 @@ private struct RoadCanvasWorkspace: View {
                 document.selectStation(id: id)
             }
         )
+        .applyPencilGestures(
+            onDoubleTap: {
+                document.toggleEraser()
+            },
+            onSqueeze: {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isPaletteExpanded.toggle()
+                }
+            }
+        )
         .ignoresSafeArea()
         .overlay(alignment: .bottomTrailing) {
             realWorldAttribution
@@ -643,6 +653,28 @@ private struct RoadCanvasWorkspace: View {
         )
     }
 
+}
+
+private extension View {
+    @ViewBuilder
+    func applyPencilGestures(
+        onDoubleTap: @escaping () -> Void,
+        onSqueeze: @escaping () -> Void
+    ) -> some View {
+        if #available(iOS 17.5, *) {
+            self
+                .onPencilDoubleTap { _ in
+                    onDoubleTap()
+                }
+                .onPencilSqueeze { phase in
+                    if case .ended = phase {
+                        onSqueeze()
+                    }
+                }
+        } else {
+            self
+        }
+    }
 }
 
 #Preview("Road editor") {

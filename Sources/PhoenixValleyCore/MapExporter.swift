@@ -209,6 +209,7 @@ public enum MapExporter {
             }
         }
 
+        drawReferenceOverlay(project, in: context)
         let engineeringStructures = visibleEngineeringStructures(in: project)
         drawBridgePiers(
             engineeringStructures,
@@ -225,6 +226,32 @@ public enum MapExporter {
         if decorations, let map = project.realWorldMap {
             CartographicRenderer.drawAttribution(map.attribution, in: context, canvasSize: fullCanvas.size)
         }
+    }
+
+    /// Keep reference imagery behind editable roads in bitmap, PDF and SVG exports.
+    private static func referenceImageRect(_ overlay: ReferenceImageOverlay) -> CGRect? {
+        guard overlay.isVisible, overlay.opacity.isFinite, overlay.opacity > 0,
+              overlay.bounds.count == 4,
+              overlay.bounds.allSatisfy(\.isFinite),
+              overlay.bounds[2] > 0, overlay.bounds[3] > 0 else { return nil }
+        return CGRect(
+            x: overlay.bounds[0], y: overlay.bounds[1],
+            width: overlay.bounds[2], height: overlay.bounds[3]
+        )
+    }
+
+    private static func drawReferenceOverlay(_ project: RoadProject, in context: CGContext) {
+        guard let overlay = project.referenceOverlay,
+              let rect = referenceImageRect(overlay),
+              let data = overlay.imageData,
+              let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return }
+        context.saveGState()
+        defer { context.restoreGState() }
+        context.setAlpha(CGFloat(min(1, overlay.opacity)))
+        context.translateBy(x: 0, y: rect.minY * 2 + rect.height)
+        context.scaleBy(x: 1, y: -1)
+        context.draw(image, in: rect)
     }
 
     private static func shorelinePath(_ points: [RoadPoint]) -> CGPath? {
@@ -782,6 +809,17 @@ public enum MapExporter {
                     to: &body
                 )
             }
+        }
+
+        if let overlay = project.referenceOverlay,
+           let rect = referenceImageRect(overlay),
+           let data = overlay.imageData {
+            // PhotosPicker normalizes imported images to JPEG or PNG.
+            let mime = data.starts(with: [0x89, 0x50, 0x4E, 0x47])
+                ? "image/png" : "image/jpeg"
+            body.append(
+                #"<image id="reference-overlay" x="\#(svgNumber(Double(rect.minX)))" y="\#(svgNumber(Double(rect.minY)))" width="\#(svgNumber(Double(rect.width)))" height="\#(svgNumber(Double(rect.height)))" opacity="\#(svgNumber(min(1, overlay.opacity)))" href="data:\#(mime);base64,\#(data.base64EncodedString())"/>"#
+            )
         }
 
         let engineeringStructures = visibleEngineeringStructures(in: project)

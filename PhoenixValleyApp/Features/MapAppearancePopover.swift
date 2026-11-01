@@ -1,6 +1,9 @@
 import Foundation
+import ImageIO
 import PhoenixValleyCore
+import PhotosUI
 import SwiftUI
+import UIKit
 
 struct MapAppearanceButton: View {
     @Binding var isPresented: Bool
@@ -49,6 +52,9 @@ struct MapAppearancePopover: View {
     @Bindable var document: RoadDocumentStore
     @Binding var enablesAdvancedEngineeringAnalysis: Bool
     @Binding var showsConstructionIssueOverlay: Bool
+    @State private var selectedPhotoItem: PhotosPickerItem? = nil
+    @State private var photoLoadTask: Task<Void, Never>?
+    @State private var referenceImportError: String?
 
     var body: some View {
         let constructionIssues = document.constructionIssues
@@ -133,6 +139,10 @@ struct MapAppearancePopover: View {
                     }
                 }
                 .font(.subheadline)
+
+                Divider()
+
+                referenceImageSection
 
                 if !document.layerConflicts.isEmpty {
                     Divider()
@@ -254,6 +264,136 @@ struct MapAppearancePopover: View {
         .scrollIndicators(.visible)
         .frame(width: 390)
         .frame(maxHeight: 620)
+    }
+
+    private var referenceImageSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("参考底图")
+                .font(.subheadline.weight(.semibold))
+
+            if let overlay = document.project.referenceOverlay {
+                Toggle(
+                    "显示底图",
+                    systemImage: overlay.isVisible ? "eye" : "eye.slash",
+                    isOn: Binding(
+                        get: { overlay.isVisible },
+                        set: { _ in document.toggleReferenceOverlayVisibility() }
+                    )
+                )
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("透明度")
+                        Spacer()
+                        Text("\(Int(overlay.opacity * 100))%")
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(
+                        value: Binding(
+                            get: { overlay.opacity },
+                            set: { document.updateReferenceOverlayOpacity($0) }
+                        ),
+                        in: 0.1...1.0,
+                        step: 0.05,
+                        onEditingChanged: { editing in
+                            if !editing { document.commitReferenceOverlayOpacityEdit() }
+                        }
+                    )
+                }
+
+                HStack(spacing: 12) {
+                    PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                        Label("更换图片", systemImage: "photo.badge.plus")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button(role: .destructive) {
+                        document.removeReferenceOverlay()
+                    } label: {
+                        Label("删除", systemImage: "trash")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            } else {
+                PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                    Label("导入参考底图", systemImage: "photo.badge.plus")
+                        .font(.subheadline)
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("import-reference-image-button")
+
+                Text("支持导入规划图或照片作为绘路半透明参考图层。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let referenceImportError {
+                Text(referenceImportError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+        .font(.subheadline)
+        .onChange(of: selectedPhotoItem) { _, newItem in
+            photoLoadTask?.cancel()
+            guard let newItem else { return }
+            referenceImportError = nil
+            let targetProjectID = document.project.id
+            photoLoadTask = Task {
+                guard let data = try? await newItem.loadTransferable(type: Data.self) else {
+                    if !Task.isCancelled { referenceImportError = "无法读取所选图片。" }
+                    return
+                }
+                guard !Task.isCancelled, selectedPhotoItem == newItem else { return }
+                guard document.project.id == targetProjectID else {
+                    // Clear stale selection so the same photo can be chosen in another project.
+                    selectedPhotoItem = nil
+                    return
+                }
+                guard let normalized = Self.prepareReferenceImage(data) else {
+                    referenceImportError = "无法处理图片，请尝试较小的 JPEG 或 PNG 图片。"
+                    selectedPhotoItem = nil
+                    return
+                }
+                document.setReferenceOverlay(
+                    imageName: "参考底图",
+                    imageData: normalized.data,
+                    bounds: normalized.bounds
+                )
+                selectedPhotoItem = nil
+            }
+        }
+    }
+
+    /// Downsample before persisting; preserve transparency in planning drawings.
+    /// Center the image without stretching its aspect ratio.
+    private static func prepareReferenceImage(_ data: Data) -> (data: Data, bounds: [Double])? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 2800,
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary),
+              image.width > 0, image.height > 0 else { return nil }
+        let width = Double(image.width), height = Double(image.height)
+        let scale = min(1600.0 / width, 1200.0 / height)
+        let fittedWidth = width * scale, fittedHeight = height * scale
+        let alpha = image.alphaInfo
+        let preservesAlpha: Bool = [
+            CGImageAlphaInfo.first, .last, .premultipliedFirst, .premultipliedLast
+        ].contains(alpha)
+        let bitmap = UIImage(cgImage: image)
+        guard let compactData = preservesAlpha
+            ? bitmap.pngData()
+            : bitmap.jpegData(compressionQuality: 0.82),
+              compactData.count <= 10_000_000 else { return nil }
+        return (
+            compactData,
+            [(1600.0 - fittedWidth) / 2, (1200.0 - fittedHeight) / 2, fittedWidth, fittedHeight]
+        )
     }
 
     private var terrainSelection: Binding<Bool> {

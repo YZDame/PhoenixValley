@@ -33,6 +33,49 @@ import Testing
     #expect(svg.contains(">200 m</text>"))
 }
 
+@Test func referenceImageIsExportedToPNG_PDF_AndSVG() throws {
+    let pixelContext = try #require(CGContext(
+        data: nil, width: 2, height: 2, bitsPerComponent: 8,
+        bytesPerRow: 8, space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ))
+    pixelContext.setFillColor(red: 1, green: 0, blue: 0, alpha: 1)
+    pixelContext.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+    let pixelImage = try #require(pixelContext.makeImage())
+    let pngBuffer = NSMutableData()
+    let destination = try #require(CGImageDestinationCreateWithData(
+        pngBuffer, "public.png" as CFString, 1, nil
+    ))
+    CGImageDestinationAddImage(destination, pixelImage, nil)
+    #expect(CGImageDestinationFinalize(destination))
+
+    var project = exportTestProject()
+    project.referenceOverlay = ReferenceImageOverlay(
+        imageName: "reference.png",
+        imageData: pngBuffer as Data,
+        opacity: 0.65,
+        bounds: [240, 180, 800, 600]
+    )
+
+    let svg = try #require(String(
+        data: MapExporter.data(for: project, format: .svg), encoding: .utf8
+    ))
+    #expect(svg.contains(#"id="reference-overlay""#))
+    #expect(svg.contains(#"x="240" y="180" width="800" height="600""#))
+    #expect(svg.contains(#"opacity="0.65""#))
+    #expect(svg.contains("data:image/png;base64,"))
+    let document = XMLParser(data: Data(svg.utf8))
+    #expect(document.parse())
+
+    let withImagePNG = try MapExporter.data(for: project, format: .png)
+    let withImagePDF = try MapExporter.data(for: project, format: .pdf)
+    project.referenceOverlay?.isVisible = false
+    let withoutImagePNG = try MapExporter.data(for: project, format: .png)
+    let withoutImagePDF = try MapExporter.data(for: project, format: .pdf)
+    #expect(withImagePNG != withoutImagePNG)
+    #expect(withImagePDF != withoutImagePDF)
+}
+
 @Test func geoJSONExportCarriesRoadSemanticsAndLocalCoordinates() throws {
     let project = exportTestProject()
     let data = try MapExporter.data(for: project, format: .geoJSON)
