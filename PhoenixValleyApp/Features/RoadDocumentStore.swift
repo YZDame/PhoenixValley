@@ -53,6 +53,7 @@ final class RoadDocumentStore {
     private var undoStack: [RoadProject] = []
     private var redoStack: [RoadProject] = []
     private let fileStore: ProjectFileStore
+    private var projectFileModifiedAt: [UUID: Date] = [:]
     private let terrainCache: TerrainGenerationCache
     @ObservationIgnored private var terrainGenerationTask: Task<Void, Never>?
     @ObservationIgnored private var terrainGenerationRequestID: UUID?
@@ -82,6 +83,7 @@ final class RoadDocumentStore {
         }
 
         let upgradedProjects = loadResult.projects.map(Self.upgraded)
+        projectFileModifiedAt = loadResult.fileModifiedAt
         let createdPlaceholder: Bool
         if let saved = upgradedProjects.first {
             projects = upgradedProjects
@@ -99,12 +101,12 @@ final class RoadDocumentStore {
         do {
             for (original, upgraded) in zip(loadResult.projects, upgradedProjects)
             where original.formatVersion != upgraded.formatVersion {
-                try fileStore.save(upgraded)
+                try saveProjectFile(upgraded)
             }
             if libraryLoadSucceeded,
                loadResult.projects.isEmpty,
                loadResult.diagnostics.isEmpty {
-                try fileStore.save(project)
+                try saveProjectFile(project)
             }
         } catch {
             saveErrorMessage = "项目升级结果未能保存：\(error.localizedDescription)"
@@ -1289,7 +1291,7 @@ final class RoadDocumentStore {
         commitReferenceOverlayOpacityEdit()
         guard let previous = undoStack.last else { return }
         do {
-            try fileStore.save(previous)
+            try saveProjectFile(previous)
             _ = undoStack.popLast()
             redoStack.append(project)
             publishPersistedProject(previous)
@@ -1305,7 +1307,7 @@ final class RoadDocumentStore {
         commitReferenceOverlayOpacityEdit()
         guard let next = redoStack.last else { return }
         do {
-            try fileStore.save(next)
+            try saveProjectFile(next)
             _ = redoStack.popLast()
             undoStack.append(project)
             publishPersistedProject(next)
@@ -1329,7 +1331,7 @@ final class RoadDocumentStore {
         candidate.groupID = project.groupID
         candidate.updatedAt = .now
         do {
-            try fileStore.save(candidate)
+            try saveProjectFile(candidate)
             cancelTerrainGeneration()
             publishPersistedProject(candidate)
             clearRoadSelection()
@@ -1393,7 +1395,7 @@ final class RoadDocumentStore {
         projects[index].updatedAt = .now
         let renamedProject = projects[index]
         if project.id == id { project = renamedProject }
-        projects.sort { $0.updatedAt > $1.updatedAt }
+        projects.sort(by: recency)
         persistProject(renamedProject)
     }
 
@@ -1430,9 +1432,9 @@ final class RoadDocumentStore {
         cancelTerrainGeneration()
         let deleted = project
         do {
-            try fileStore.delete(deleted)
+            try deleteProjectFile(deleted)
             projects.removeAll { $0.id == deleted.id }
-            if let next = projects.sorted(by: { $0.updatedAt > $1.updatedAt }).first {
+            if let next = projects.sorted(by: recency).first {
                 project = next
             } else {
                 let seed = UInt64.random(in: 1...UInt64.max)
@@ -1537,6 +1539,9 @@ final class RoadDocumentStore {
             if project.id == projects[index].id { project = projects[index] }
             persistProject(projects[index])
         }
+        // File writes above bumped mtimes used by `recency`; re-sort once so
+        // the array stays consistent with a fresh load's ordering.
+        projects.sort(by: recency)
         persistGroups()
     }
 
@@ -1548,6 +1553,7 @@ final class RoadDocumentStore {
         projects[index].groupID = groupID
         if project.id == id { project = projects[index] }
         persistProject(projects[index])
+        projects.sort(by: recency)
     }
 
     func dismissSaveError() {
@@ -1583,7 +1589,7 @@ final class RoadDocumentStore {
             return false
         }
         do {
-            try fileStore.save(candidate)
+            try saveProjectFile(candidate)
             checkpointForUndo()
             publishPersistedProject(candidate)
             saveErrorMessage = nil
@@ -1601,7 +1607,7 @@ final class RoadDocumentStore {
         } else {
             projects.append(persistedProject)
         }
-        projects.sort { $0.updatedAt > $1.updatedAt }
+        projects.sort(by: recency)
     }
 
     private func sanitizeRoadSelection(visibleOnly: Bool = false) {
@@ -1771,8 +1777,8 @@ final class RoadDocumentStore {
             } else {
                 projects.append(project)
             }
-            projects.sort { $0.updatedAt > $1.updatedAt }
-            try fileStore.save(project)
+            try saveProjectFile(project)
+            projects.sort(by: recency)
             saveErrorMessage = nil
         } catch {
             saveErrorMessage = error.localizedDescription
@@ -1781,7 +1787,7 @@ final class RoadDocumentStore {
 
     private func persistProject(_ project: RoadProject) {
         do {
-            try fileStore.save(project)
+            try saveProjectFile(project)
             saveErrorMessage = nil
         } catch {
             saveErrorMessage = error.localizedDescription
@@ -1965,6 +1971,7 @@ final class RoadDocumentStore {
                 project = projects[index]
             }
             persistProject(projects[index])
+            projects.sort(by: recency)
         }
 
         terrainGenerationRequestID = nil
@@ -2039,6 +2046,26 @@ final class RoadDocumentStore {
     private static func needsTerrainRegeneration(_ terrain: TerrainLayout) -> Bool {
         !terrain.hasElevationData
             || terrain.generationVersion < TerrainLayout.currentGenerationVersion
+    }
+
+    /// Persists a project file and records the write time, so recency
+    /// tiebreaks match what a fresh `loadLibrary()` would observe.
+    private func saveProjectFile(_ project: RoadProject) throws {
+        try fileStore.save(project)
+        projectFileModifiedAt[project.id] = Date()
+    }
+
+    private func deleteProjectFile(_ project: RoadProject) throws {
+        try fileStore.delete(project)
+        projectFileModifiedAt.removeValue(forKey: project.id)
+    }
+
+    /// Same comparator `ProjectFileStore` uses for `loadLibrary()` ordering —
+    /// `updatedAt` desc, file modification time, then project id — so
+    /// in-memory re-sorts cannot reshuffle legacy projects that share a
+    /// whole-second timestamp differently than a fresh load would.
+    private func recency(_ lhs: RoadProject, _ rhs: RoadProject) -> Bool {
+        ProjectFileStore.libraryRecency(lhs, rhs, fileModifiedAt: projectFileModifiedAt)
     }
 
     private func engineeringErrorMessage(

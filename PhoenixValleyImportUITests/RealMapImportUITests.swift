@@ -11,6 +11,9 @@ final class RealMapImportUITests: XCTestCase {
         app.launch()
         XCUIDevice.shared.orientation = .landscapeLeft
         let create = app.buttons["新建"]
+        if !create.exists {
+            app.buttons["显示边栏"].tap()
+        }
         XCTAssertTrue(create.waitForExistence(timeout: 30))
         create.tap()
         let entry = app.buttons["import-real-map"]
@@ -48,6 +51,9 @@ final class RealMapImportUITests: XCTestCase {
         attach("Imported real-world map")
         app.terminate()
         app.launch()
+        if !app.buttons["新建"].exists {
+            app.buttons["显示边栏"].tap()
+        }
         XCTAssertTrue(app.staticTexts[mapName].waitForExistence(timeout: 30))
         attach("Imported map after process restart")
     }
